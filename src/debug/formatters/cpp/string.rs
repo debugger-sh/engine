@@ -1,4 +1,29 @@
-//! `std::string` formatter.
+//! `std::string` (libc++ `basic_string<char>`) formatter.
+//!
+//! See the corresponding [LLDB formatter code](https://github.com/llvm/llvm-project/blob/main/lldb/source/Plugins/Language/CPlusPlus/LibCxx.cpp)
+//! for reference.
+
+// libc++ stores the string as a union of two reps sharing the same storage
+// (12 bytes on wasm32). The high bit of the last byte is `__is_long_`, which
+// selects which representation is live.
+//
+// Short (SSO, characters inline):
+//
+//        +-------------------------------+ class __short
+//   0    | char __data_[__min_cap];      |  inline buffer (11 bytes for char)
+//        | char __padding_[...];         |
+//  11    | unsigned char __size_    : 7; |  low 7 bits = length
+//        | unsigned char __is_long_ : 1; |  high bit  = 0
+//        +-------------------------------+
+//
+// Long (heap-allocated):
+//
+//        +-------------------------------+ class __long
+//   0    | pointer    __data_;           |  pointer to heap buffer
+//   4    | size_type  __size_;           |  string length
+//   8    | size_type  __cap_    : 31;    |  capacity (low 31 bits)
+//        | size_type  __is_long_:  1;    |  high bit = 1
+//        +-------------------------------+
 
 use std::fmt::Write;
 use std::ops::Range;
@@ -20,11 +45,20 @@ impl StdStringFormatter {
 
         if header & 0x80 == 0 {
             let len = (header & 0x7f) as usize;
-            let buf = rep
+            let inline = rep
                 .child_with_name("__s")
                 .and_then(|s| s.child_with_name("__data_"))
-                .and_then(|d| d.address())
                 .context("__s.__data_")?;
+            // Sanity: short size must fit inside the inline buffer; otherwise
+            // the string is likely uninitialized and we'd render garbage.
+            // LLDB also bails when `byte_size` is unavailable; we don't, since
+            // clang-on-wasm always emits the array bound for char[__min_cap].
+            if let Some(cap) = inline.ty().byte_size() {
+                if len > cap as usize {
+                    anyhow::bail!("std::string short size {len} exceeds inline buffer {cap}");
+                }
+            }
+            let buf = inline.address().context("__s.__data_ address")?;
             return Ok(dbg.memory().read_memory(buf, len));
         }
 
@@ -58,6 +92,10 @@ fn quote(bytes: &[u8]) -> String {
     s.push('"');
     s
 }
+
+// ╭──────────────────────────────────────────────────────────────────────────╮
+// │ StdStringFormatter                                                       │
+// ╰──────────────────────────────────────────────────────────────────────────╯
 
 impl VariableFormatter for StdStringFormatter {
     fn matches(&self, ty: &Type) -> bool {
