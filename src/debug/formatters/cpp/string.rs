@@ -7,28 +7,41 @@ use anyhow::{Context, Result};
 
 use crate::debug::formatters::{ChildCounts, VariableFormatter};
 use crate::debug::{Type, Variable};
-use crate::types::GlobalAddress;
 
 pub struct StdStringFormatter;
 
 impl StdStringFormatter {
-    /// Decodes the libc++ `std::string` SSO union into the raw character bytes.
-    //
-    // On wasm32 the union is 12 bytes. The high bit of the last byte is
-    // `__is_long_`; we decode it from the raw layout because bitfields aren't
-    // yet surfaced by the type graph.
-    //   short: bytes[..len] hold the chars; low 7 bits of byte 11 = len
-    //   long:  ptr u32, size u32, cap u32 (top bit of cap is __is_long_)
     fn read(value: &Variable) -> Result<Vec<u8>> {
-        let bytes = value.read(12).context("read std::string rep")?;
-        if bytes[11] & 0x80 == 0 {
-            let len = (bytes[11] & 0x7f) as usize;
-            return Ok(bytes[..len].to_vec());
-        }
-        let addr = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
-        let len = u32::from_le_bytes(bytes[4..8].try_into().unwrap()) as usize;
         let dbg = value.debugger().context("no debugger")?;
-        Ok(dbg.memory().read_memory(GlobalAddress::from(addr), len))
+        let rep = value.child_with_name("__rep_").context("__rep_")?;
+        let s = rep.child_with_name("__s").context("__s")?;
+
+        // Bitfields read as their whole containing byte/word, so mask the
+        // SSO discriminator off the size byte manually.
+        let header = s
+            .child_with_name("__size_")
+            .and_then(|f| f.unsigned_value())
+            .context("__s.__size_")? as u8;
+
+        if header & 0x80 == 0 {
+            let len = (header & 0x7f) as usize;
+            let buf = s
+                .child_with_name("__data_")
+                .and_then(|d| d.address())
+                .context("__s.__data_")?;
+            return Ok(dbg.memory().read_memory(buf, len));
+        }
+
+        let l = rep.child_with_name("__l").context("__l")?;
+        let data = l
+            .child_with_name("__data_")
+            .and_then(|d| d.pointer_value())
+            .context("__l.__data_")?;
+        let len = l
+            .child_with_name("__size_")
+            .and_then(|f| f.unsigned_value())
+            .context("__l.__size_")? as usize;
+        Ok(dbg.memory().read_memory(data, len))
     }
 }
 
