@@ -27,6 +27,24 @@ impl StdStringFormatter {
     }
 }
 
+fn quote(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() + 2);
+    s.push('"');
+    for &b in bytes {
+        match b {
+            b'"' => s.push_str("\\\""),
+            b'\\' => s.push_str("\\\\"),
+            b'\n' => s.push_str("\\n"),
+            b'\r' => s.push_str("\\r"),
+            b'\t' => s.push_str("\\t"),
+            0x20..=0x7e => s.push(b as char),
+            _ => write!(s, "\\x{b:02x}").unwrap(),
+        }
+    }
+    s.push('"');
+    s
+}
+
 impl VariableFormatter for StdStringFormatter {
     fn matches(&self, ty: &Type) -> bool {
         let name = ty.name();
