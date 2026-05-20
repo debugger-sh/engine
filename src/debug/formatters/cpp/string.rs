@@ -14,19 +14,15 @@ impl StdStringFormatter {
     fn read(value: &Variable) -> Result<Vec<u8>> {
         let dbg = value.debugger().context("no debugger")?;
         let rep = value.child_with_name("__rep_").context("__rep_")?;
-        let s = rep.child_with_name("__s").context("__s")?;
 
-        // Bitfields read as their whole containing byte/word, so mask the
-        // SSO discriminator off the size byte manually.
-        let header = s
-            .child_with_name("__size_")
-            .and_then(|f| f.unsigned_value())
-            .context("__s.__size_")? as u8;
+        // __is_long_ / __size_ in __short are bitfields,
+        let header = rep.read(12).context("read __rep_")?[11];
 
         if header & 0x80 == 0 {
             let len = (header & 0x7f) as usize;
-            let buf = s
-                .child_with_name("__data_")
+            let buf = rep
+                .child_with_name("__s")
+                .and_then(|s| s.child_with_name("__data_"))
                 .and_then(|d| d.address())
                 .context("__s.__data_")?;
             return Ok(dbg.memory().read_memory(buf, len));
