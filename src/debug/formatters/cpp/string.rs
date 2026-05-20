@@ -35,6 +35,9 @@ use crate::debug::{Type, Variable};
 
 pub struct StdStringFormatter;
 
+// High bit of `__short`'s size byte — set iff the string is in `__long` mode.
+const IS_LONG_BIT: u8 = 0x80;
+
 impl StdStringFormatter {
     fn read(value: &Variable) -> Result<Vec<u8>> {
         let dbg = value.debugger().context("no debugger")?;
@@ -43,8 +46,8 @@ impl StdStringFormatter {
         // __is_long_ / __size_ in __short are bitfields,
         let header = rep.read(12).context("read __rep_")?[11];
 
-        if header & 0x80 == 0 {
-            let len = (header & 0x7f) as usize;
+        if header & IS_LONG_BIT == 0 {
+            let len = (header & !IS_LONG_BIT) as usize;
             let inline = rep
                 .child_with_name("__s")
                 .and_then(|s| s.child_with_name("__data_"))
