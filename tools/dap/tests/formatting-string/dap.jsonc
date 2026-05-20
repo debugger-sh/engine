@@ -1,7 +1,9 @@
-// Exploratory scenario: capture how lldb-dap renders std::string locals
-// across the four interesting shapes (empty, SSO, heap, escapes). The
-// stream lands in tools/dap/output/formatting-string/log.json and becomes
-// the golden reference for StdStringFormatter.
+// Golden test for StdStringFormatter. Covers the four libc++ std::string
+// shapes that matter: empty (short, len 0), SSO (short, len <= 22), heap
+// (long, follows pointer), and content with characters that need C-escapes.
+// Each std::string is presented as a leaf with `value` = quoted, C-escaped
+// contents — matching LLDB's summary format and dropping its raw __r_/__rep
+// child for ergonomics.
 {
   "steps": [
     {
@@ -66,47 +68,19 @@
       "command": "variables",
       "arguments": { "variablesReference": "{{locals}}" }
     },
-    // Intentionally permissive: we don't yet know the exact value strings
-    // lldb-dap will emit — those are precisely what we want to read off
-    // the captured log.
     {
       "type": "response",
       "body": {
         "variables": {
           "$array.contains": [
-            { "name": "empty", "variablesReference": "${{empty}}" },
-            { "name": "sso", "variablesReference": "${{sso}}" },
-            { "name": "heap", "variablesReference": "${{heap}}" },
-            { "name": "with_quotes", "variablesReference": "${{wq}}" }
+            { "name": "empty",       "value": "\"\"",                  "variablesReference": 0 },
+            { "name": "sso",         "value": "\"hello\"",             "variablesReference": 0 },
+            { "name": "heap",        "value": "\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"", "variablesReference": 0 },
+            { "name": "with_quotes", "value": "\"he said \\\"hi\\\"\\n\"", "variablesReference": 0 }
           ]
         }
       }
     },
-    // Drill into each string to see whether lldb-dap exposes children.
-    {
-      "type": "request",
-      "command": "variables",
-      "arguments": { "variablesReference": "{{empty}}" }
-    },
-    { "type": "response", "body": {} },
-    {
-      "type": "request",
-      "command": "variables",
-      "arguments": { "variablesReference": "{{sso}}" }
-    },
-    { "type": "response", "body": {} },
-    {
-      "type": "request",
-      "command": "variables",
-      "arguments": { "variablesReference": "{{heap}}" }
-    },
-    { "type": "response", "body": {} },
-    {
-      "type": "request",
-      "command": "variables",
-      "arguments": { "variablesReference": "{{wq}}" }
-    },
-    { "type": "response", "body": {} },
     {
       "type": "request",
       "command": "continue",

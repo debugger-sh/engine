@@ -1,5 +1,6 @@
 //! `std::vector` formatter.
 
+use std::fmt::Write;
 use std::ops::Range;
 
 use anyhow::{Context, Result};
