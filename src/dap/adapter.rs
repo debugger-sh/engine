@@ -173,18 +173,26 @@ impl DapState {
     }
 
     fn variable_response(&mut self, var: &Variable) -> Result<Value> {
-        // Only ask for child counts here. If the variable is expandable, store the
-        // parent as the next handle instead of eagerly materializing its children.
-        let counts = var.num_children()?;
+        // A formatter failure on one variable must not erase the whole locals
+        // list — render the error inline and keep going.
+        let counts = var.num_children().unwrap_or_default();
         let sub_ref = if counts.is_empty() {
             0
         } else {
-            self.vars.allocate_variable(var.clone(), counts.clone())?
+            match self.vars.allocate_variable(var.clone(), counts.clone()) {
+                Ok(r) => r,
+                Err(_) => 0,
+            }
+        };
+
+        let display = match var.display() {
+            Ok(s) => s,
+            Err(e) => format!("<error: {e}>"),
         };
 
         let mut value = json!({
             "name": var.name(),
-            "value": var.display()?,
+            "value": display,
             "type": var.ty().name(),
             "variablesReference": sub_ref,
         });
