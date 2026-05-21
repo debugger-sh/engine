@@ -111,6 +111,23 @@
       "body": {
         "variables": {
           "$array.contains": [
+            { "name": "*cptr", "variablesReference": "${{cptr_deref}}" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{cptr_deref}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
             { "name": "a", "type": "long", "value": "1" },
             { "name": "b", "type": "long", "value": "2" }
           ]

@@ -64,8 +64,8 @@ impl VariableFormatter for ReferentialFormatter {
 
 fn map_reference<T>(
     value: &Variable,
-    scalar: impl FnOnce(Variable) -> Result<T>,
-    structure: impl FnOnce(Variable) -> Result<T>,
+    pointer: impl FnOnce(Variable) -> Result<T>,
+    reference: impl FnOnce(Variable) -> Result<T>,
 ) -> Result<T>
 where
     T: Default,
@@ -86,12 +86,9 @@ where
                         return Ok(T::default());
                     };
 
-                    match value.ty().child(*target).resolved() {
-                        Some(TypeDeclaration::Scalar { .. }) => scalar(referent),
-                        _ => structure(referent),
-                    }
+                    pointer(referent)
                 }
-                ReferenceKind::Reference | ReferenceKind::Temporary => return structure(referent),
+                ReferenceKind::Reference | ReferenceKind::Temporary => return reference(referent),
             }
         }
         _ => bail!("Cannot format non-referential value"),
