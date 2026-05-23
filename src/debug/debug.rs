@@ -94,21 +94,18 @@ impl Debugger {
     }
 
     /// Computes the formatter for a given type, if any
-    ///
-    /// Within a category, we will try to first match the exact type of the variable
-    /// before trying the type after all modifiers have been removed.
     pub fn formatter_for(&self, ty: &Type) -> Option<Rc<dyn VariableFormatter>> {
-        let stripped = ty.discard_modifiers();
-
         for category in self.formatters.iter().rev() {
-            let formatters = &category.formatters;
-
-            if let Some(formatter) = category.formatter_for(ty) {
-                return Some(formatter);
-            }
-
-            if let Some(formatter) = category.formatter_for(&stripped) {
-                return Some(formatter);
+            let mut current = ty.clone();
+            loop {
+                if let Some(formatter) = category.formatter_for(&current) {
+                    return Some(formatter);
+                }
+                let next = current.skip_one_modifier();
+                if next == current {
+                    break;
+                }
+                current = next;
             }
         }
 

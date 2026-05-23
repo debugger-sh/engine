@@ -110,9 +110,9 @@ impl TreeIterator {
 
         let value_type = tree
             .ty()
-            .discard_modifiers()
+            .skip_modifiers()
             .direct_nested_type_with_name("value_type")?
-            .discard_modifiers();
+            .skip_modifiers();
 
         let size = tree
             .child_with_name("__size_")

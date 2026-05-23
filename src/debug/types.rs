@@ -163,21 +163,39 @@ impl Type {
         }
     }
 
-    /// Discard any typedef or modifiers and return the underlying type.
-    pub fn discard_modifiers(&self) -> Type {
-        let mut ty = self.clone();
-        let Some(graph) = self.graph() else {
-            return ty;
-        };
-        while let Some(TypeDeclaration::ModifiedType { inner, .. }) = graph.decl(ty.root) {
-            ty = ty.child(*inner);
+    /// Discards all modifiers (e.g. const, volatile, typedef, using, etc.)
+    /// and returns the underlying type.
+    ///
+    /// If there are no modifiers to discard, returns the same type.
+    pub fn skip_modifiers(&self) -> Type {
+        let mut curr = self.clone();
+        loop {
+            let next = curr.skip_one_modifier();
+            if next == curr {
+                return curr;
+            }
+            curr = next;
         }
-        ty
     }
 
-    /// Walks past `typedef`/cv-qualifier modifiers and returns the underlying declaration.
+    /// Discards one modifier (e.g. const, volatile, typedef, using, etc.)
+    /// and returns the underlying type.
     ///
-    /// Equivalent to the [TypeDeclaration] of [Type::discard_modifiers].
+    /// If there are no modifiers to discard, returns the same type.
+    pub fn skip_one_modifier(&self) -> Type {
+        let Some(graph) = self.graph() else {
+            return self.clone();
+        };
+        if let Some(TypeDeclaration::ModifiedType { inner, .. }) = graph.decl(self.root) {
+            self.child(*inner)
+        } else {
+            self.clone()
+        }
+    }
+
+    /// Skips modifiers and returns the underlying declaration.
+    ///
+    /// Equivalent to the underyling [TypeDeclaration] of [Type::skip_modifiers].
     pub fn resolved(&self) -> Option<&TypeDeclaration> {
         let graph = self.graph()?;
         let mut current = graph.decl(self.root)?;
@@ -266,6 +284,12 @@ impl Type {
             }
         })
         .context(format!("No such type named {name}"))
+    }
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        self.root == other.root
     }
 }
 
