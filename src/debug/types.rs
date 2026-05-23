@@ -36,14 +36,6 @@ impl NamespaceHierarchy {
         // TODO: This is a hack, we should really parse out all template parameters
         qualified.replace("std::__2::", "std::")
     }
-
-    pub fn matches(&self, target: &str) -> bool {
-        if target.is_empty() {
-            return false;
-        }
-        let parts: Vec<&str> = target.split("::").collect();
-        self.0.len() >= parts.len() && self.0.iter().zip(&parts).all(|(a, b)| a == b)
-    }
 }
 
 #[derive(Clone)]
@@ -206,6 +198,18 @@ impl Type {
         };
 
         decl_name(graph.decl(self.root), graph)
+    }
+
+    /// Checks if the type's fully qualified name matches a regular expression.
+    pub fn matches(&self, regex: &str) -> bool {
+        let name = self.name();
+        match regex::Regex::new(regex) {
+            Ok(re) => re.is_match(&name),
+            Err(_) => {
+                crate::util::warning!("Failed to compile regular expression: {regex}");
+                false
+            }
+        }
     }
 
     /// Size in bytes of this type, or `None` if unknown.

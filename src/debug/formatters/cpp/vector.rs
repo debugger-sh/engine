@@ -62,8 +62,7 @@ impl StdVectorFormatter {
 
 impl VariableFormatter for StdVectorFormatter {
     fn matches(&self, ty: &Type) -> bool {
-        let name = ty.name();
-        ty.ns().matches("std") && (name == "std::vector" || name.starts_with("std::vector<"))
+        ty.matches("^std::vector<.+>$")
     }
 
     fn display(&self, value: &Variable) -> Result<String> {

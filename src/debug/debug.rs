@@ -33,6 +33,16 @@ pub struct FormatterCategory {
     formatters: Vec<Rc<dyn VariableFormatter>>,
 }
 
+impl FormatterCategory {
+    fn formatter_for(&self, ty: &Type) -> Option<Rc<dyn VariableFormatter>> {
+        self.formatters
+            .iter()
+            .rev()
+            .find(|f| f.matches(ty))
+            .cloned()
+    }
+}
+
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Main-thread Debugger                                                     │
 // ╰──────────────────────────────────────────────────────────────────────────╯
@@ -92,11 +102,13 @@ impl Debugger {
 
         for category in self.formatters.iter().rev() {
             let formatters = &category.formatters;
-            if let Some(formatter) = formatters.iter().rev().find(|f| f.matches(ty)) {
-                return Some(formatter.clone());
+
+            if let Some(formatter) = category.formatter_for(ty) {
+                return Some(formatter);
             }
-            if let Some(formatter) = formatters.iter().rev().find(|f| f.matches(&stripped)) {
-                return Some(formatter.clone());
+
+            if let Some(formatter) = category.formatter_for(&stripped) {
+                return Some(formatter);
             }
         }
 

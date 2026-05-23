@@ -102,10 +102,7 @@ fn quote(bytes: &[u8]) -> String {
 
 impl VariableFormatter for StdStringFormatter {
     fn matches(&self, ty: &Type) -> bool {
-        let name = ty.name();
-        ty.ns().matches("std")
-            && name.starts_with("std::basic_string<char,")
-            && !name.contains(">::")
+        ty.matches("^std::basic_string<char,.*>$")
     }
 
     fn display(&self, value: &Variable) -> Result<String> {

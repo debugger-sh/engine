@@ -44,3 +44,4 @@ gimli = { git = "https://github.com/gimli-rs/gimli" }
 wasm-encoder = { version = "0.245", features = ["wasmparser"] }
 wasmparser = "0.245"
 serde_json = "1.0.149"
+regex = "1.12.3"

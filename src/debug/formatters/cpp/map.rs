@@ -201,7 +201,7 @@ pub struct StdMapFormatter;
 
 impl VariableFormatter for StdMapFormatter {
     fn matches(&self, ty: &Type) -> bool {
-        is_container(ty, "map") || is_container(ty, "set")
+        ty.matches("^std::(set|map)<.+>$")
     }
 
     fn display(&self, value: &Variable) -> Result<String> {
