@@ -245,7 +245,7 @@ impl Type {
             } => {
                 // Arrays don't always store a byte size in advance
                 // Sometimes it must be computed from the array bounds/count on a best effort basis
-                *byte_size.or_else(|| {
+                byte_size.or_else(|| {
                     let elem_size = self.child(*element_type).byte_size()?;
                     let count = match (lower_bound, upper_bound) {
                         (_, ArrayUpperBound::Count(ArrayBound::Constant(c))) => Some(*c),
