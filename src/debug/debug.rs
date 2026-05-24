@@ -181,7 +181,9 @@ impl Debugger {
         //
         // TODO: how to handle inline functions where a line
         // may map to multiple instructions?
-        let (index, loc) = self
+        //
+        // TODO: how to speed this query up for large location lists?
+        let mut candidates: Vec<_> = self
             .info
             .locations
             .iter()
@@ -191,9 +193,12 @@ impl Debugger {
                 let loc_line = l.1.line as i64;
                 *file == target && loc_line >= line
             })
-            .min_by_key(|l| l.1.address)?;
+            .collect();
 
-        flags.set_index(index as u32, 1);
+        candidates.sort_by_key(|l| l.1.line);
+        let (index, loc) = candidates.iter().min_by_key(|l| l.1.address)?;
+
+        flags.set_index(*index as u32, 1);
         Some(loc)
     }
 
