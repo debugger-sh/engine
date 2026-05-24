@@ -237,7 +237,28 @@ impl Type {
         match self.resolved()? {
             TypeDeclaration::Scalar { byte_size, .. } => Some(*byte_size),
             TypeDeclaration::Structure { byte_size, .. } => Some(*byte_size),
-            TypeDeclaration::Array { byte_size, .. } => *byte_size,
+            TypeDeclaration::Array {
+                byte_size,
+                lower_bound,
+                upper_bound,
+                element_type,
+            } => {
+                // Arrays don't always store a byte size in advance
+                // Sometimes it must be computed from the array bounds/count on a best effort basis
+                *byte_size.or_else(|| {
+                    let elem_size = self.child(*element_type).byte_size()?;
+                    let count = match (lower_bound, upper_bound) {
+                        (_, ArrayUpperBound::Count(ArrayBound::Constant(c))) => Some(*c),
+                        (
+                            ArrayBound::Constant(lo),
+                            ArrayUpperBound::Index(ArrayBound::Constant(hi)),
+                        ) => Some(*hi - *lo + 1),
+                        _ => None,
+                    }?;
+
+                    Some(elem_size * count as u64)
+                })
+            }
             // Pointers/references are wasm32 — 4 bytes
             // TODO: Use the unit address size
             TypeDeclaration::Referential { .. } => Some(4),
