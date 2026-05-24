@@ -13,14 +13,11 @@ impl VariableFormatter for StructureFormatter {
     }
 
     fn display(&self, value: &Variable) -> Result<String> {
-        match value.ty().resolved() {
-            Some(TypeDeclaration::Structure { .. }) => Ok(if let Some(addr) = value.address() {
-                format!("@{addr}")
-            } else {
-                String::default()
-            }),
-            _ => bail!("Cannot format non-structure value"),
-        }
+        Ok(if let Some(addr) = value.address() {
+            format!("@{addr}")
+        } else {
+            String::default()
+        })
     }
 
     fn num_children(&self, value: &Variable) -> Result<ChildCounts> {
