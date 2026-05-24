@@ -184,7 +184,7 @@ impl Debugger {
         // may map to multiple instructions?
         //
         // TODO: how to speed this query up for large location lists?
-        let mut candidates: Vec<_> = self
+        let (index, loc) = self
             .info
             .locations
             .iter()
@@ -194,12 +194,13 @@ impl Debugger {
                 let loc_line = l.1.line as i64;
                 *file == target && loc_line >= line
             })
-            .collect();
+            .min_by(|l1, l2| {
+                l1.1.line
+                    .cmp(&l2.1.line)
+                    .then_with(|| l1.1.address.cmp(&l2.1.address))
+            })?;
 
-        candidates.sort_by_key(|l| l.1.line);
-        let (index, loc) = candidates.iter().min_by_key(|l| l.1.address)?;
-
-        flags.set_index(*index as u32, 1);
+        flags.set_index(index as u32, 1);
         Some(loc)
     }
 
