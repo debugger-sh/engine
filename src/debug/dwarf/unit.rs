@@ -1,4 +1,4 @@
-use std::{num::NonZeroU64, path::PathBuf};
+use std::{collections::HashMap, num::NonZeroU64, path::PathBuf};
 
 use crate::{
     debug::dwarf::{DerefContext, Die, Dwarf},
@@ -24,6 +24,9 @@ pub struct Unit {
     unit: gimli::Unit<R>,
     properties: UnitProperties,
     files: Vec<PathBuf>,
+    /// Map of parent DIE offsets within this unit.
+    /// The keys are child offsets and the values are the parents of those children.
+    pub(super) parents: HashMap<gimli::UnitOffset, gimli::UnitOffset>,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy, Serialize, Deserialize)]
@@ -59,6 +62,7 @@ impl Unit {
             unit,
             properties: self.properties.clone(),
             files: self.files.clone(),
+            parents: self.parents.clone(),
         }
     }
 
@@ -125,12 +129,46 @@ impl<'a> UnitParser<'a> {
         let file_offset = self.file_index;
         self.file_index += files.len();
 
+        let parents = weak_error!(parse_parents(&unit)).unwrap_or_default();
+
         Some(Unit {
             properties: UnitProperties { index, file_offset },
             unit,
             files,
+            parents,
         })
     }
+}
+
+fn parse_parents(
+    unit: &gimli::Unit<R>,
+) -> gimli::Result<HashMap<gimli::UnitOffset, gimli::UnitOffset>> {
+    let mut parents = HashMap::new();
+    let mut stack = Vec::new();
+
+    let mut entries = unit.entries();
+    while entries.next_entry()? {
+        let Some(die) = entries.current() else {
+            continue;
+        };
+        if die.is_null() {
+            continue;
+        }
+
+        let depth = entries.depth() as usize;
+        if depth > 0 {
+            parents.insert(die.offset, stack[depth - 1]);
+        }
+
+        if depth >= stack.len() {
+            stack.push(die.offset);
+        } else {
+            stack[depth] = die.offset;
+            stack.truncate(depth + 1);
+        }
+    }
+
+    Ok(parents)
 }
 
 fn parse_lines(

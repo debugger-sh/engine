@@ -3,10 +3,10 @@ use anyhow::{Context, Result};
 use crate::{
     debug::{
         Debugger, EvaluationContext,
-        dwarf::{Die, DieReference, Dwarf, R},
+        dwarf::{Die, DieReference, Dwarf, R, Visit},
         formatters::VariableFormatter,
     },
-    util::{Ref, WeakRef},
+    util::{Ref, WeakRef, weak_error},
 };
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
@@ -14,17 +14,9 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 pub type TypeId = DieReference;
 
 #[derive(Clone, Debug, Default)]
-pub struct NamespaceHierarchy(Vec<String>);
+pub struct NamespaceHierarchy(pub Vec<String>);
 
 impl NamespaceHierarchy {
-    pub fn push(&mut self, name: String) {
-        self.0.push(name);
-    }
-
-    pub fn pop(&mut self) {
-        self.0.pop();
-    }
-
     pub fn qualify(&self, name: &str) -> String {
         let qualified = if self.0.is_empty() {
             name.to_string()
@@ -97,31 +89,26 @@ pub enum Modifier {
 #[derive(Clone, Debug)]
 pub enum TypeDeclaration {
     Scalar {
-        ns: NamespaceHierarchy,
         name: String,
         byte_size: u64,
         encoding: gimli::DwAte,
     },
     Array {
-        ns: NamespaceHierarchy,
         byte_size: Option<u64>,
         element_type: TypeId,
         lower_bound: Value,
         upper_bound: Option<Value>,
     },
     Referential {
-        ns: NamespaceHierarchy,
         target: TypeId,
         kind: ReferenceKind,
     },
     Structure {
-        ns: NamespaceHierarchy,
         name: Option<String>,
         byte_size: u64,
         members: Vec<StructureMember>,
     },
     ModifiedType {
-        ns: NamespaceHierarchy,
         name: Option<String>,
         modifier: Modifier,
         inner: TypeId,
@@ -224,7 +211,7 @@ impl Type {
             return "<unknown>".to_string();
         };
 
-        decl_name(graph.decl(self.root), graph)
+        decl_name(self.root, graph)
     }
 
     /// Checks if the type's fully qualified name matches a regular expression.
@@ -249,17 +236,6 @@ impl Type {
             // TODO: Use the unit address size
             TypeDeclaration::Referential { .. } => Some(4),
             _ => None,
-        }
-    }
-
-    pub fn ns(&self) -> &NamespaceHierarchy {
-        match self.resolved() {
-            Some(TypeDeclaration::Scalar { ns, .. })
-            | Some(TypeDeclaration::Array { ns, .. })
-            | Some(TypeDeclaration::Referential { ns, .. })
-            | Some(TypeDeclaration::Structure { ns, .. })
-            | Some(TypeDeclaration::ModifiedType { ns, .. }) => ns,
-            None => panic!("Unhandled namespace case"),
         }
     }
 
@@ -302,18 +278,18 @@ impl PartialEq for Type {
     }
 }
 
-fn decl_name(decl: Option<&TypeDeclaration>, graph: &TypeGraph) -> String {
-    let Some(decl) = decl else {
+fn decl_name(id: TypeId, graph: &TypeGraph) -> String {
+    let Some(decl) = graph.decl(id) else {
         return "<unknown>".to_string();
     };
     match decl {
-        TypeDeclaration::Scalar { name, ns, .. } => ns.qualify(name),
-        TypeDeclaration::Structure { name, ns, .. } => name
+        TypeDeclaration::Scalar { name, .. } => graph.namespace(id).qualify(name),
+        TypeDeclaration::Structure { name, .. } => name
             .as_deref()
-            .map(|name| ns.qualify(name))
+            .map(|name| graph.namespace(id).qualify(name))
             .unwrap_or_else(|| "<anonymous>".to_string()),
         TypeDeclaration::Referential { target, kind, .. } => {
-            let inner = decl_name(graph.decl(*target), graph);
+            let inner = decl_name(*target, graph);
             match kind {
                 ReferenceKind::Pointer => format!("{inner}*"),
                 ReferenceKind::Reference => format!("{inner}&"),
@@ -326,7 +302,7 @@ fn decl_name(decl: Option<&TypeDeclaration>, graph: &TypeGraph) -> String {
             upper_bound,
             ..
         } => {
-            let elem = decl_name(graph.decl(*element_type), graph);
+            let elem = decl_name(*element_type, graph);
             let count = match (lower_bound, upper_bound) {
                 (Value::Constant(lo), Some(Value::Constant(hi))) => Some(hi - lo + 1),
                 _ => None,
@@ -338,14 +314,13 @@ fn decl_name(decl: Option<&TypeDeclaration>, graph: &TypeGraph) -> String {
         }
         TypeDeclaration::ModifiedType {
             name,
-            ns,
             modifier,
             inner,
         } => {
             if let Some(name) = name {
-                return ns.qualify(name);
+                return graph.namespace(id).qualify(name);
             }
-            let inner_name = decl_name(graph.decl(*inner), graph);
+            let inner_name = decl_name(*inner, graph);
             match modifier {
                 Modifier::TypeDef => inner_name,
                 Modifier::Const => format!("const {inner_name}"),
@@ -363,7 +338,12 @@ impl TypeGraph {
             let mut types = HashMap::new();
             for unit in dwarf.units() {
                 if let Some(root) = unit.root(dwarf) {
-                    walk_die(&root, &mut types, &mut NamespaceHierarchy::default());
+                    root.traverse(|die| {
+                        if let Some(decl) = parse_type_declaration(&die) {
+                            types.insert(die.die_ref(), decl);
+                        }
+                        Visit::Continue
+                    });
                 }
             }
             TypeGraph {
@@ -375,10 +355,6 @@ impl TypeGraph {
         })
     }
 
-    pub fn decl(&self, id: TypeId) -> Option<&TypeDeclaration> {
-        self.types.get(&id)
-    }
-
     pub fn get(&self, id: TypeId) -> Type {
         Type {
             root: id,
@@ -386,59 +362,26 @@ impl TypeGraph {
         }
     }
 
-    pub fn contains(&self, id: &TypeId) -> bool {
+    fn decl(&self, id: TypeId) -> Option<&TypeDeclaration> {
+        self.types.get(&id)
+    }
+
+    fn contains(&self, id: &TypeId) -> bool {
         return self.types.contains_key(id);
     }
-}
 
-fn walk_die(
-    die: &Die<'_>,
-    types: &mut HashMap<TypeId, TypeDeclaration>,
-    ns: &mut NamespaceHierarchy,
-) {
-    if let Some(decl) = parse_type_declaration(die, ns) {
-        types.insert(die.die_ref(), decl);
-    }
-
-    let ns_part = parse_namespace_component(die);
-    let has_ns = ns_part.is_some();
-
-    if let Some(ns_part) = ns_part {
-        ns.push(ns_part);
-    }
-
-    die.for_each_child(|child| walk_die(&child, types, ns));
-
-    if has_ns {
-        ns.pop();
+    fn namespace(&self, id: TypeId) -> NamespaceHierarchy {
+        let Some(debugger) = self.debugger.as_deref() else {
+            return NamespaceHierarchy::default();
+        };
+        weak_error!(id.deref(&debugger.info().dwarf).map(|die| die.namespace())).unwrap_or_default()
     }
 }
 
-fn parse_namespace_component(die: &Die<'_>) -> Option<String> {
-    if matches!(
-        die.tag(),
-        gimli::DW_TAG_namespace | gimli::DW_TAG_structure_type | gimli::DW_TAG_class_type
-    ) {
-        // If DW_AT_export_symbols is set to `true`, this represents
-        // an inline namespace such as the `__2` in `std::__2`.
-        // These shouldn't be included in the namespace chain since they are
-        // semantically ignored.
-        if die.has_flag(gimli::DW_AT_export_symbols) {
-            None
-        } else {
-            die.name()
-        }
-    } else {
-        None
-    }
-}
-
-fn parse_type_declaration(die: &Die<'_>, ns: &NamespaceHierarchy) -> Option<TypeDeclaration> {
-    let ns = ns.clone();
+fn parse_type_declaration(die: &Die<'_>) -> Option<TypeDeclaration> {
     match die.tag() {
         gimli::DW_TAG_base_type => Some(TypeDeclaration::Scalar {
             name: die.name().unwrap_or_default(),
-            ns,
             byte_size: u64_attr(die, gimli::DW_AT_byte_size)?,
             encoding: match die.attr_value(gimli::DW_AT_encoding)? {
                 gimli::AttributeValue::Encoding(e) => e,
@@ -446,47 +389,39 @@ fn parse_type_declaration(die: &Die<'_>, ns: &NamespaceHierarchy) -> Option<Type
             },
         }),
         gimli::DW_TAG_pointer_type => Some(TypeDeclaration::Referential {
-            ns,
             target: die.type_ref()?,
             kind: ReferenceKind::Pointer,
         }),
         gimli::DW_TAG_reference_type => Some(TypeDeclaration::Referential {
-            ns,
             target: die.type_ref()?,
             kind: ReferenceKind::Reference,
         }),
         gimli::DW_TAG_rvalue_reference_type => Some(TypeDeclaration::Referential {
-            ns,
             target: die.type_ref()?,
             kind: ReferenceKind::Temporary,
         }),
         gimli::DW_TAG_typedef => Some(TypeDeclaration::ModifiedType {
             name: die.name(),
-            ns,
             modifier: Modifier::TypeDef,
             inner: die.type_ref()?,
         }),
         gimli::DW_TAG_const_type => Some(TypeDeclaration::ModifiedType {
             name: die.name(),
-            ns,
             modifier: Modifier::Const,
             inner: die.type_ref()?,
         }),
         gimli::DW_TAG_volatile_type => Some(TypeDeclaration::ModifiedType {
             name: die.name(),
-            ns,
             modifier: Modifier::Volatile,
             inner: die.type_ref()?,
         }),
         gimli::DW_TAG_atomic_type => Some(TypeDeclaration::ModifiedType {
             name: die.name(),
-            ns,
             modifier: Modifier::Atomic,
             inner: die.type_ref()?,
         }),
         gimli::DW_TAG_restrict_type => Some(TypeDeclaration::ModifiedType {
             name: die.name(),
-            ns,
             modifier: Modifier::Restrict,
             inner: die.type_ref()?,
         }),
@@ -498,7 +433,6 @@ fn parse_type_declaration(die: &Die<'_>, ns: &NamespaceHierarchy) -> Option<Type
                 })
                 .unwrap_or((Value::Constant(0), None));
             Some(TypeDeclaration::Array {
-                ns,
                 byte_size: u64_attr(die, gimli::DW_AT_byte_size),
                 element_type,
                 lower_bound,
@@ -508,7 +442,6 @@ fn parse_type_declaration(die: &Die<'_>, ns: &NamespaceHierarchy) -> Option<Type
         gimli::DW_TAG_structure_type | gimli::DW_TAG_union_type | gimli::DW_TAG_class_type => {
             Some(TypeDeclaration::Structure {
                 name: die.name(),
-                ns,
                 byte_size: u64_attr(die, gimli::DW_AT_byte_size)?,
                 members: die.collect_children(parse_member),
             })

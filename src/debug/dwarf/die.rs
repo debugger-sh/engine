@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
-use crate::types::GlobalAddress;
 use crate::util::weak_error;
+use crate::{debug::NamespaceHierarchy, types::GlobalAddress};
 
 use super::{Dwarf, R, Unit};
 use gimli::Reader;
@@ -71,6 +71,28 @@ impl<'a> Die<'a> {
 
     pub fn name(&self) -> Option<String> {
         self.attr_to_string(gimli::DW_AT_name)
+    }
+
+    pub fn namespace(&self) -> NamespaceHierarchy {
+        let mut components = Vec::with_capacity(self.die.depth.max(0) as usize);
+        let mut parent = self.parent();
+
+        while let Some(current) = parent {
+            if let Some(component) = parse_namespace_component(&current) {
+                components.push(component);
+            }
+            parent = current.parent()
+        }
+
+        components.reverse();
+        NamespaceHierarchy(components)
+    }
+
+    pub fn parent(&self) -> Option<Die<'a>> {
+        let parent_ofs = self.ctx.unit.parents.get(&self.die.offset)?;
+        let mut die_ref = self.die_ref();
+        die_ref.unit_ofs = *parent_ofs;
+        weak_error!(die_ref.deref(self.ctx.dwarf))
     }
 
     pub fn die(&self) -> &gimli::DebuggingInformationEntry<R> {
@@ -235,4 +257,23 @@ pub enum Visit {
     SkipChildren,
     /// Stop traversal immediately
     Break,
+}
+
+fn parse_namespace_component(die: &Die<'_>) -> Option<String> {
+    if matches!(
+        die.tag(),
+        gimli::DW_TAG_namespace | gimli::DW_TAG_structure_type | gimli::DW_TAG_class_type
+    ) {
+        // If DW_AT_export_symbols is set to `true`, this represents
+        // an inline namespace such as the `__2` in `std::__2`.
+        // These shouldn't be included in the namespace chain since they are
+        // semantically ignored.
+        if die.has_flag(gimli::DW_AT_export_symbols) {
+            None
+        } else {
+            die.name()
+        }
+    } else {
+        None
+    }
 }
