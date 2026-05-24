@@ -3,7 +3,7 @@ use std::ops::Range;
 use anyhow::{Result, bail};
 
 use crate::debug::formatters::{ChildCounts, VariableFormatter};
-use crate::debug::{Type, TypeDeclaration, Value, Variable};
+use crate::debug::{MemberLocation, Type, TypeDeclaration, Variable};
 
 pub struct StructureFormatter;
 
@@ -46,8 +46,10 @@ impl VariableFormatter for StructureFormatter {
                     };
 
                     let offset = match &member.location {
-                        Some(Value::Constant(v)) => *v,
-                        Some(Value::Expr(expr)) => value.context().evaluate_signed(expr.clone())?,
+                        Some(MemberLocation::Constant(v)) => *v,
+                        Some(MemberLocation::Expr(expr)) => {
+                            value.context().evaluate_signed(expr.clone())?
+                        }
                         None => 0,
                     };
 

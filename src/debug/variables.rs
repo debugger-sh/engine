@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use crate::{
     debug::{
-        Debugger, EvaluationContext, ReferenceKind, Type, TypeDeclaration, Value,
+        Debugger, EvaluationContext, MemberLocation, ReferenceKind, Type, TypeDeclaration,
         dwarf::{Die, R, Visit},
         formatters::ChildCounts,
     },
@@ -251,8 +251,10 @@ impl Variable {
         // TODO: This code is duplicated by the structure formatter
         // Eventually might want to coalesce this somehow if the logic gets more complicated
         let offset = match &member.location {
-            Some(Value::Constant(value)) => *value,
-            Some(Value::Expr(expr)) => self.context().evaluate_signed(expr.clone()).ok()?,
+            Some(MemberLocation::Constant(value)) => *value,
+            Some(MemberLocation::Expr(expr)) => {
+                self.context().evaluate_signed(expr.clone()).ok()?
+            }
             None => 0,
         };
 

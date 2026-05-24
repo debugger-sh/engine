@@ -1,0 +1,170 @@
+// Default array formatter: indexed children for fixed-size and runtime-sized arrays.
+{
+  "steps": [
+    {
+      "type": "request",
+      "command": "setBreakpoints",
+      "arguments": {
+        "source": { "path": "main.cpp" },
+        "breakpoints": [{ "line": 6 }, { "line": 8 }]
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "breakpoints": {
+          "$array.contains": [
+            { "line": 6, "verified": true },
+            { "line": 8, "verified": true }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "configurationDone",
+      "arguments": {}
+    },
+    {
+      "type": "event",
+      "event": "stopped",
+      "body": { "reason": "breakpoint", "threadId": "${{thread}}" }
+    },
+    {
+      "type": "request",
+      "command": "stackTrace",
+      "arguments": { "threadId": "{{thread}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "stackFrames": {
+          "$array.contains": [{ "name": "main", "id": "${{mainFrame}}" }]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "scopes",
+      "arguments": { "frameId": "{{mainFrame}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "scopes": {
+          "$array.contains": [{ "name": "Locals", "variablesReference": "${{locals}}" }]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": { "variablesReference": "{{locals}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            {
+              "name": "fixed",
+              "indexedVariables": 3,
+              "variablesReference": "${{fixed}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": { "variablesReference": "{{fixed}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": [
+          { "name": "[0]", "value": "1", "variablesReference": 0 },
+          { "name": "[1]", "value": "2", "variablesReference": 0 },
+          { "name": "[2]", "value": "3", "variablesReference": 0 }
+        ]
+      }
+    },
+    {
+      "type": "request",
+      "command": "continue",
+      "arguments": { "threadId": "{{thread}}" }
+    },
+    {
+      "type": "event",
+      "event": "stopped",
+      "body": { "reason": "breakpoint", "threadId": "{{thread}}" }
+    },
+    {
+      "type": "request",
+      "command": "stackTrace",
+      "arguments": { "threadId": "{{thread}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "stackFrames": {
+          "$array.contains": [{ "name": "main", "id": "${{mainFrame2}}" }]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "scopes",
+      "arguments": { "frameId": "{{mainFrame2}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "scopes": {
+          "$array.contains": [{ "name": "Locals", "variablesReference": "${{locals2}}" }]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": { "variablesReference": "{{locals2}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": [
+          { "name": "fixed" },
+          { "name": "n" },
+          {
+            "name": "dyn",
+            "indexedVariables": 4,
+            "variablesReference": "${{dyn}}"
+          }
+        ]
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": { "variablesReference": "{{dyn}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": [
+          { "name": "[0]", "value": "0", "variablesReference": 0 },
+          { "name": "[1]", "value": "10", "variablesReference": 0 },
+          { "name": "[2]", "value": "20", "variablesReference": 0 },
+          { "name": "[3]", "value": "30", "variablesReference": 0 }
+        ]
+      }
+    },
+    {
+      "type": "request",
+      "command": "continue",
+      "arguments": { "threadId": "{{thread}}" }
+    }
+  ]
+}

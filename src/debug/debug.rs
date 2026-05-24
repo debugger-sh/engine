@@ -77,6 +77,7 @@ impl Debugger {
                             Rc::new(formatters::default::ScalarFormatter),
                             Rc::new(formatters::default::ReferentialFormatter),
                             Rc::new(formatters::default::StructureFormatter),
+                            Rc::new(formatters::default::ArrayFormatter),
                         ],
                     },
                     FormatterCategory {
@@ -387,14 +388,12 @@ impl EvaluationContext {
     }
 
     /// Evaluates an expression and returns the result as an unsigned value, if possible.
-    ///
-    /// **Note:** Values are sign extended if the resulting value is signed.
     pub fn evaluate_unsigned(&self, expr: gimli::Expression<R>) -> Result<u64> {
         // TODO: How does this method interact with multi-piece values?
         let pieces = self.evaluate(expr)?;
         let piece = pieces.first().context("Evaluation resulted in no pieces")?;
         match &piece.location {
-            gimli::Location::Value { value } => Ok(value.to_u64(u64::MAX)?),
+            gimli::Location::Value { value } => gimli_value_to_u64(*value),
             gimli::Location::Address { address } => Ok(*address),
             _ => anyhow::bail!(
                 "Could not determine value from piece location {:?}",
@@ -404,10 +403,19 @@ impl EvaluationContext {
     }
 
     /// Evaluates an expression and returns the result as a signed value, if possible.
-    ///
-    /// **Note:** Unsigned values greater than or equal to [u32::MAX] will overflow.
     pub fn evaluate_signed(&self, expr: gimli::Expression<R>) -> Result<i64> {
-        Ok(self.evaluate_unsigned(expr)? as i64)
+        let pieces = self.evaluate(expr)?;
+        let piece = pieces.first().context("Evaluation resulted in no pieces")?;
+        match &piece.location {
+            gimli::Location::Value { value } => gimli_value_to_i64(*value),
+            gimli::Location::Address { address } => (*address)
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("DWARF value out of range for i64")),
+            _ => anyhow::bail!(
+                "Could not determine value from piece location {:?}",
+                piece.location
+            ),
+        }
     }
 
     /// Evaluates an expression and returns the resulting pieces.
@@ -469,5 +477,37 @@ impl EvaluationContext {
         Ok(gimli::Value::Generic(
             debugger.stack().read_u64(offset.into()),
         ))
+    }
+}
+
+fn gimli_value_to_u64(value: gimli::Value) -> Result<u64> {
+    match value {
+        gimli::Value::Generic(v) if (v as i64) >= 0 => Ok(v),
+        gimli::Value::I8(v) if v >= 0 => Ok(v as u64),
+        gimli::Value::I16(v) if v >= 0 => Ok(v as u64),
+        gimli::Value::I32(v) if v >= 0 => Ok(v as u64),
+        gimli::Value::I64(v) if v >= 0 => Ok(v as u64),
+        gimli::Value::U8(v) => Ok(v.into()),
+        gimli::Value::U16(v) => Ok(v.into()),
+        gimli::Value::U32(v) => Ok(v.into()),
+        gimli::Value::U64(v) => Ok(v),
+        _ => anyhow::bail!("DWARF value {value:?} cannot be converted to u64"),
+    }
+}
+
+fn gimli_value_to_i64(value: gimli::Value) -> Result<i64> {
+    match value {
+        gimli::Value::Generic(v) => Ok(v as i64),
+        gimli::Value::I8(v) => Ok(v.into()),
+        gimli::Value::I16(v) => Ok(v.into()),
+        gimli::Value::I32(v) => Ok(v.into()),
+        gimli::Value::I64(v) => Ok(v),
+        gimli::Value::U8(v) => Ok(v.into()),
+        gimli::Value::U16(v) => Ok(v.into()),
+        gimli::Value::U32(v) => Ok(v.into()),
+        gimli::Value::U64(v) => v
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("DWARF value {value:?} out of range for i64")),
+        _ => anyhow::bail!("DWARF value {value:?} cannot be converted to i64"),
     }
 }

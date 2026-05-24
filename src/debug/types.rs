@@ -48,16 +48,23 @@ pub struct TypeGraph {
 /// Represents a value that can either hold a constant integer value
 /// or be encoded as an expression.
 #[derive(Clone, Debug)]
-pub enum Value {
+pub enum MemberLocation {
     Constant(i64),
     Expr(gimli::Expression<R>),
 }
 
 #[derive(Clone, Debug)]
 pub struct StructureMember {
-    pub location: Option<Value>,
+    pub location: Option<MemberLocation>,
     pub name: Option<String>,
     pub ty: TypeId,
+}
+
+#[derive(Clone, Debug)]
+pub enum ArrayBound {
+    Constant(i64),
+    Expr(gimli::Expression<R>),
+    Ref(DieReference)
 }
 
 #[derive(Clone, Debug)]
@@ -87,8 +94,8 @@ pub enum TypeDeclaration {
     Array {
         byte_size: Option<u64>,
         element_type: TypeId,
-        lower_bound: Value,
-        upper_bound: Option<Value>,
+        lower_bound: MemberLocation,
+        upper_bound: Option<MemberLocation>,
     },
     Referential {
         target: TypeId,
@@ -295,7 +302,7 @@ fn decl_name(id: TypeId, graph: &TypeGraph) -> String {
         } => {
             let elem = decl_name(*element_type, graph);
             let count = match (lower_bound, upper_bound) {
-                (Value::Constant(lo), Some(Value::Constant(hi))) => Some(hi - lo + 1),
+                (MemberLocation::Constant(lo), Some(MemberLocation::Constant(hi))) => Some(hi - lo + 1),
                 _ => None,
             };
             match count {
@@ -422,7 +429,7 @@ fn parse_type_declaration(die: &Die<'_>) -> Option<TypeDeclaration> {
                 .find_children(|c| {
                     (c.tag() == gimli::DW_TAG_subrange_type).then(|| parse_subrange(&c))
                 })
-                .unwrap_or((Value::Constant(0), None));
+                .unwrap_or((MemberLocation::Constant(0), None));
             Some(TypeDeclaration::Array {
                 byte_size: u64_attr(die, gimli::DW_AT_byte_size),
                 element_type,
@@ -449,9 +456,9 @@ fn parse_member(die: Die<'_>) -> Option<StructureMember> {
     let location = die
         .attr_value(gimli::DW_AT_data_member_location)
         .and_then(|v| match v {
-            gimli::AttributeValue::Udata(u) => Some(Value::Constant(u as i64)),
-            gimli::AttributeValue::Sdata(s) => Some(Value::Constant(s)),
-            gimli::AttributeValue::Exprloc(e) => Some(Value::Expr(e)),
+            gimli::AttributeValue::Udata(u) => Some(MemberLocation::Constant(u as i64)),
+            gimli::AttributeValue::Sdata(s) => Some(MemberLocation::Constant(s)),
+            gimli::AttributeValue::Exprloc(e) => Some(MemberLocation::Expr(e)),
             _ => None,
         });
     Some(StructureMember {
@@ -461,11 +468,11 @@ fn parse_member(die: Die<'_>) -> Option<StructureMember> {
     })
 }
 
-fn parse_subrange(die: &Die<'_>) -> (Value, Option<Value>) {
+fn parse_subrange(die: &Die<'_>) -> (MemberLocation, Option<MemberLocation>) {
     let lower = die
         .attr_value(gimli::DW_AT_lower_bound)
         .and_then(array_bound)
-        .unwrap_or(Value::Constant(0));
+        .unwrap_or(MemberLocation::Constant(0));
     let upper = die
         .attr_value(gimli::DW_AT_upper_bound)
         .and_then(array_bound)
@@ -473,11 +480,11 @@ fn parse_subrange(die: &Die<'_>) -> (Value, Option<Value>) {
     (lower, upper)
 }
 
-fn array_bound(value: gimli::AttributeValue<R>) -> Option<Value> {
+fn array_bound(value: gimli::AttributeValue<R>) -> Option<MemberLocation> {
     match value {
-        gimli::AttributeValue::Udata(u) => Some(Value::Constant(u as i64)),
-        gimli::AttributeValue::Sdata(s) => Some(Value::Constant(s)),
-        gimli::AttributeValue::Exprloc(e) => Some(Value::Expr(e)),
+        gimli::AttributeValue::Udata(u) => Some(MemberLocation::Constant(u as i64)),
+        gimli::AttributeValue::Sdata(s) => Some(MemberLocation::Constant(s)),
+        gimli::AttributeValue::Exprloc(e) => Some(MemberLocation::Expr(e)),
         _ => None,
     }
 }
