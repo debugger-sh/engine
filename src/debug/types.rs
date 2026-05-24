@@ -64,7 +64,15 @@ pub struct StructureMember {
 pub enum ArrayBound {
     Constant(i64),
     Expr(gimli::Expression<R>),
-    Ref(DieReference)
+    Ref(DieReference),
+}
+
+#[derive(Clone, Debug)]
+pub enum ArrayUpperBound {
+    /// Represents the maximum addressable index allowed for this array
+    Index(ArrayBound),
+    /// Represents the number of total elements held by the array
+    Count(ArrayBound),
 }
 
 #[derive(Clone, Debug)]
@@ -94,8 +102,8 @@ pub enum TypeDeclaration {
     Array {
         byte_size: Option<u64>,
         element_type: TypeId,
-        lower_bound: MemberLocation,
-        upper_bound: Option<MemberLocation>,
+        lower_bound: ArrayBound,
+        upper_bound: ArrayUpperBound,
     },
     Referential {
         target: TypeId,
@@ -302,7 +310,10 @@ fn decl_name(id: TypeId, graph: &TypeGraph) -> String {
         } => {
             let elem = decl_name(*element_type, graph);
             let count = match (lower_bound, upper_bound) {
-                (MemberLocation::Constant(lo), Some(MemberLocation::Constant(hi))) => Some(hi - lo + 1),
+                (_, ArrayUpperBound::Count(ArrayBound::Constant(c))) => Some(*c),
+                (ArrayBound::Constant(lo), ArrayUpperBound::Index(ArrayBound::Constant(hi))) => {
+                    Some(*hi - *lo + 1)
+                }
                 _ => None,
             };
             match count {
@@ -429,7 +440,10 @@ fn parse_type_declaration(die: &Die<'_>) -> Option<TypeDeclaration> {
                 .find_children(|c| {
                     (c.tag() == gimli::DW_TAG_subrange_type).then(|| parse_subrange(&c))
                 })
-                .unwrap_or((MemberLocation::Constant(0), None));
+                .unwrap_or((
+                    ArrayBound::Constant(0),
+                    ArrayUpperBound::Index(ArrayBound::Constant(0)),
+                ));
             Some(TypeDeclaration::Array {
                 byte_size: u64_attr(die, gimli::DW_AT_byte_size),
                 element_type,
@@ -468,23 +482,29 @@ fn parse_member(die: Die<'_>) -> Option<StructureMember> {
     })
 }
 
-fn parse_subrange(die: &Die<'_>) -> (MemberLocation, Option<MemberLocation>) {
+fn parse_subrange(die: &Die<'_>) -> (ArrayBound, ArrayUpperBound) {
     let lower = die
         .attr_value(gimli::DW_AT_lower_bound)
         .and_then(array_bound)
-        .unwrap_or(MemberLocation::Constant(0));
+        .unwrap_or(ArrayBound::Constant(0));
     let upper = die
         .attr_value(gimli::DW_AT_upper_bound)
         .and_then(array_bound)
-        .or_else(|| die.attr_value(gimli::DW_AT_count).and_then(array_bound));
+        .map(ArrayUpperBound::Index)
+        .or_else(|| {
+            die.attr_value(gimli::DW_AT_count)
+                .and_then(array_bound)
+                .map(ArrayUpperBound::Count)
+        })
+        .unwrap_or(ArrayUpperBound::Index(ArrayBound::Constant(0)));
     (lower, upper)
 }
 
-fn array_bound(value: gimli::AttributeValue<R>) -> Option<MemberLocation> {
+fn array_bound(value: gimli::AttributeValue<R>) -> Option<ArrayBound> {
     match value {
-        gimli::AttributeValue::Udata(u) => Some(MemberLocation::Constant(u as i64)),
-        gimli::AttributeValue::Sdata(s) => Some(MemberLocation::Constant(s)),
-        gimli::AttributeValue::Exprloc(e) => Some(MemberLocation::Expr(e)),
+        gimli::AttributeValue::Udata(u) => Some(ArrayBound::Constant(u as i64)),
+        gimli::AttributeValue::Sdata(s) => Some(ArrayBound::Constant(s)),
+        gimli::AttributeValue::Exprloc(e) => Some(ArrayBound::Expr(e)),
         _ => None,
     }
 }
