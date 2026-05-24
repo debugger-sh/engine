@@ -36,6 +36,18 @@ pub fn get_variables<'a>(die: &Die<'a>, pc: GlobalAddress) -> Vec<Die<'a>> {
             gimli::DW_TAG_formal_parameter
             | gimli::DW_TAG_variable
             | gimli::DW_TAG_local_variable => {
+                // If this subprogram is a member function, then DW_AT_object_pointer will contain
+                // the reference to the DW_TAG_formal_parameter which represents the `this` or `self` parameter.
+                // Since this attribute is typically marked as artificial, and we exclude artificial members in
+                // the traversal below, we will use this as a special case to make sure that `this` is included.
+                if child.has_flag(gimli::DW_AT_artificial)
+                    && die
+                        .die_ref_attr(gimli::DW_AT_object_pointer)
+                        .is_none_or(|op| op != child.die_ref())
+                {
+                    return Visit::Continue;
+                }
+
                 result.push(child);
             }
 

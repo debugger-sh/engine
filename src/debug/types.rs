@@ -423,11 +423,11 @@ fn parse_namespace_component(die: &Die<'_>) -> Option<String> {
         // an inline namespace such as the `__2` in `std::__2`.
         // These shouldn't be included in the namespace chain since they are
         // semantically ignored.
-        let exported = matches!(
-            die.attr_value(gimli::DW_AT_export_symbols),
-            Some(gimli::AttributeValue::Flag(true))
-        );
-        if exported { None } else { die.name() }
+        if die.has_flag(gimli::DW_AT_export_symbols) {
+            None
+        } else {
+            die.name()
+        }
     } else {
         None
     }

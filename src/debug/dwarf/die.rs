@@ -99,8 +99,9 @@ impl<'a> Die<'a> {
         return Some((low_pc, high_pc));
     }
 
-    pub fn type_ref(&self) -> Option<DieReference> {
-        let attr = self.attr(gimli::DW_AT_type)?;
+    /// Gets an attribute as a [DieReference], if possible.
+    pub fn die_ref_attr(&self, attr: gimli::DwAt) -> Option<DieReference> {
+        let attr = self.attr(attr)?;
         match attr.value() {
             gimli::AttributeValue::UnitRef(offset) => Some(DieReference {
                 unit_index: self.ctx.unit.index(),
@@ -108,6 +109,18 @@ impl<'a> Die<'a> {
             }),
             _ => None,
         }
+    }
+
+    pub fn type_ref(&self) -> Option<DieReference> {
+        self.die_ref_attr(gimli::DW_AT_type)
+    }
+
+    /// `true` if the DIE has this flag, `false` otherwise.
+    pub fn has_flag(&self, attr: gimli::DwAt) -> bool {
+        matches!(
+            self.attr_value(attr),
+            Some(gimli::AttributeValue::Flag(true))
+        )
     }
 
     pub fn expression(&self, attr: gimli::DwAt, pc: GlobalAddress) -> Option<gimli::Expression<R>> {
