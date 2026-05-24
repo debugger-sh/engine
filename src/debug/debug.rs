@@ -147,7 +147,7 @@ impl Debugger {
 
             frames.push(StackFrame {
                 id: frames.len() as u32,
-                name: die.name().unwrap_or(String::new()),
+                name: die.qualified_name().unwrap_or(String::new()),
                 line: loc.as_ref().map_or(0, |l| l.line as u32),
                 column: loc.as_ref().map_or(0, |l| l.column as u32),
                 source: loc.as_ref().map(|l| {

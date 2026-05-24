@@ -73,6 +73,23 @@ impl<'a> Die<'a> {
         self.attr_to_string(gimli::DW_AT_name)
     }
 
+    /// Returns the qualified name of this entry which includes
+    /// the namespace chain (e.g. std::copy).
+    pub fn qualified_name(&self) -> Option<String> {
+        let name = self.name().or_else(|| {
+            // We will use the specification name if the regular name does not exist.
+            // When generating debugging info for member functions, DWARF will include
+            // two DIEs for each member function: one for the specification and one for
+            // the definition of the member function. The definition typically lacks the
+            // DW_AT_name, so we resolve it here
+            let spec = self.die_ref_attr(gimli::DW_AT_specification)?;
+            let spec_die = weak_error!(spec.deref(self.ctx.dwarf))?;
+            spec_die.name()
+        })?;
+
+        Some(self.namespace().qualify(&name))
+    }
+
     pub fn namespace(&self) -> NamespaceHierarchy {
         let mut components = Vec::with_capacity(self.die.depth.max(0) as usize);
         let mut parent = self.parent();
