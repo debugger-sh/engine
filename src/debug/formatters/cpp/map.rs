@@ -59,7 +59,7 @@ impl MapEntry {
         };
 
         let addr_size = self.0.debugger()?.address_size();
-        Some(MapEntry(self.0.child_at_offset(addr_size)))
+        Some(MapEntry(self.0.child_at_offset(addr_size as isize)))
     }
 
     fn parent(&self) -> Option<MapEntry> {
@@ -68,7 +68,7 @@ impl MapEntry {
         };
 
         let addr_size = self.0.debugger()?.address_size();
-        Some(MapEntry(self.0.child_at_offset(2 * addr_size)))
+        Some(MapEntry(self.0.child_at_offset(2 * addr_size as isize)))
     }
 
     fn is_left_child(&self) -> bool {

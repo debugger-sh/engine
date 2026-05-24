@@ -55,7 +55,7 @@ impl VariableFormatter for StructureFormatter {
 
                     out.push(
                         value
-                            .child_at_offset(offset as usize)
+                            .child_at_offset(offset as isize)
                             .with_name(name)
                             .with_type(&value.ty().child(member.ty)),
                     );

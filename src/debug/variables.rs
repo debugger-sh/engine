@@ -259,7 +259,7 @@ impl Variable {
         };
 
         Some(
-            self.child_at_offset(offset as usize)
+            self.child_at_offset(offset as isize)
                 .with_name(name)
                 .with_type(&self.ty().child(member.ty)),
         )
@@ -274,13 +274,15 @@ impl Variable {
     /// Roughly speaking, the offsets correspond to the same as "space" as the variable's children.
     /// E.g. an `int* ptr`'s `child_at_offset(0)` would return `ptr[0]`, a structured variable
     /// `my_struct_t x`'s `child_at_offset(0)` would return the first member, and so on.
-    pub fn child_at_offset(&self, offset: usize) -> Variable {
+    pub fn child_at_offset(&self, offset: isize) -> Variable {
         // TODO: This function is very important, albeit poorly tested/understood.
         // It will fail under optimizing compilers, which may store values as collections of pieces
         // rather than the simple formats that this method assumes.
         //
         // More cases should be added for multi-piece values.
         // These should be rigorously tested under a test harness.
+        //
+        // Also need better testing for negative offsets
 
         // Dereference pointer types
         let mut pieces = match self.ty.resolved() {
@@ -293,7 +295,7 @@ impl Variable {
         };
 
         // Skip `ofs` bytes through the piece vector
-        let mut ofs = offset as u64;
+        let mut ofs = offset.max(0) as u64;
         while let Some(p) = pieces.first() {
             let Some(bits) = p.size_in_bits else { break };
             let piece_bytes = ((bits) + 7) / 8;
@@ -306,9 +308,22 @@ impl Variable {
 
         // Add `ofs` bytes to the first piece
         if let Some(p) = pieces.first_mut() {
+            let adjustment = if offset >= 0 {
+                ofs as i64
+            } else {
+                offset as i64
+            };
             match &mut p.location {
-                gimli::Location::Address { address } => *address += ofs,
-                _ => p.bit_offset = Some(p.bit_offset.unwrap_or(0) + ofs * 8),
+                gimli::Location::Address { address } => {
+                    *address = address.wrapping_add_signed(adjustment);
+                }
+                _ => {
+                    p.bit_offset = Some(
+                        p.bit_offset
+                            .unwrap_or(0)
+                            .wrapping_add_signed(adjustment.saturating_mul(8)),
+                    )
+                }
             }
         }
 

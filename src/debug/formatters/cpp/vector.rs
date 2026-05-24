@@ -86,7 +86,7 @@ impl VariableFormatter for StdVectorFormatter {
         for i in start..end {
             result.push(
                 data.begin
-                    .child_at_offset(i * data.elem_size)
+                    .child_at_offset((i * data.elem_size) as isize)
                     .with_name(&format!("[{i}]"))
                     .with_type(&data.elem_ty),
             );
