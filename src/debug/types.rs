@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 
 use crate::{
     debug::{
-        Debugger, EvaluationContext,
+        Debugger,
         dwarf::{Die, DieReference, Dwarf, R, Visit},
         formatters::VariableFormatter,
     },
@@ -483,29 +483,31 @@ fn parse_member(die: Die<'_>) -> Option<StructureMember> {
 }
 
 fn parse_subrange(die: &Die<'_>) -> (ArrayBound, ArrayUpperBound) {
-    let lower = die
-        .attr_value(gimli::DW_AT_lower_bound)
-        .and_then(array_bound)
-        .unwrap_or(ArrayBound::Constant(0));
-    let upper = die
-        .attr_value(gimli::DW_AT_upper_bound)
-        .and_then(array_bound)
+    let lower = array_bound(die, gimli::DW_AT_lower_bound).unwrap_or(ArrayBound::Constant(0));
+    let upper = array_bound(die, gimli::DW_AT_upper_bound)
         .map(ArrayUpperBound::Index)
-        .or_else(|| {
-            die.attr_value(gimli::DW_AT_count)
-                .and_then(array_bound)
-                .map(ArrayUpperBound::Count)
-        })
+        .or_else(|| array_bound(die, gimli::DW_AT_count).map(ArrayUpperBound::Count))
         .unwrap_or(ArrayUpperBound::Index(ArrayBound::Constant(0)));
     (lower, upper)
 }
 
-fn array_bound(value: gimli::AttributeValue<R>) -> Option<ArrayBound> {
+fn array_bound(die: &Die<'_>, attr: gimli::DwAt) -> Option<ArrayBound> {
+    if let Some(die_ref) = die.die_ref_attr(attr) {
+        return Some(ArrayBound::Ref(die_ref));
+    }
+
+    let value = die.attr_value(attr)?;
     match value {
-        gimli::AttributeValue::Udata(u) => Some(ArrayBound::Constant(u as i64)),
-        gimli::AttributeValue::Sdata(s) => Some(ArrayBound::Constant(s)),
         gimli::AttributeValue::Exprloc(e) => Some(ArrayBound::Expr(e)),
-        _ => None,
+        _ => {
+            if let Some(signed) = value.sdata_value() {
+                Some(ArrayBound::Constant(signed))
+            } else if let Some(unsigned) = value.udata_value() {
+                i64::try_from(unsigned).ok().map(ArrayBound::Constant)
+            } else {
+                None
+            }
+        }
     }
 }
 

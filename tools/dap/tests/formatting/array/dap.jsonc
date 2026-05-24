@@ -139,7 +139,7 @@
           { "name": "n" },
           {
             "name": "dyn",
-            "indexedVariables": 4,
+            "indexedVariables": 8,
             "variablesReference": "${{dyn}}"
           }
         ]
@@ -157,7 +157,11 @@
           { "name": "[0]", "value": "0", "variablesReference": 0 },
           { "name": "[1]", "value": "10", "variablesReference": 0 },
           { "name": "[2]", "value": "20", "variablesReference": 0 },
-          { "name": "[3]", "value": "30", "variablesReference": 0 }
+          { "name": "[3]", "value": "30", "variablesReference": 0 },
+          { "name": "[4]", "value": "40", "variablesReference": 0 },
+          { "name": "[5]", "value": "50", "variablesReference": 0 },
+          { "name": "[6]", "value": "60", "variablesReference": 0 },
+          { "name": "[7]", "value": "70", "variablesReference": 0 }
         ]
       }
     },
