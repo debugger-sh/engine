@@ -124,15 +124,19 @@ impl DapState {
     fn handle_scopes(&mut self, args: &Value) -> Result<Value> {
         let frame_id = args.get("frameId").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
         let dbg = self.debugger().context("No debugger attached")?;
-        let (arguments, locals) = dbg.get_variables(frame_id);
+        let variables = dbg.get_variables(frame_id)?;
 
         let mut scopes: Vec<Value> = Vec::new();
-        if !arguments.is_empty() {
-            scopes.push(self.scope_response("Arguments", arguments));
+        if !variables.arguments.is_empty() {
+            scopes.push(self.scope_response("Arguments", variables.arguments));
         }
-        if !locals.is_empty() {
-            scopes.push(self.scope_response("Locals", locals));
+        if !variables.locals.is_empty() {
+            scopes.push(self.scope_response("Locals", variables.locals));
         }
+        if !variables.globals.is_empty() {
+            scopes.push(self.scope_response("Globals", variables.globals));
+        }
+
         Ok(json!({ "scopes": scopes }))
     }
 

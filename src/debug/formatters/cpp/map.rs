@@ -192,11 +192,6 @@ impl TreeIterator {
 // │ StdMapFormatter                                                          │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-fn is_container(ty: &Type, container: &str) -> bool {
-    let name = ty.name();
-    name.starts_with(&format!("std::{container}<")) && !name.contains(">::")
-}
-
 pub struct StdMapFormatter;
 
 impl VariableFormatter for StdMapFormatter {

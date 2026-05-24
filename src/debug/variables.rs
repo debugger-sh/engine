@@ -2,12 +2,11 @@ use std::ops::Range;
 
 use crate::{
     debug::{
-        Debugger, ReferenceKind, Type, TypeDeclaration,
+        Debugger, EvaluationContext, ReferenceKind, Type, TypeDeclaration,
         dwarf::{Die, R, Visit},
         formatters::ChildCounts,
     },
     types::GlobalAddress,
-    util::WeakRef,
 };
 
 use anyhow::Result;
@@ -66,7 +65,7 @@ pub fn get_location(die: &Die<'_>, pc: GlobalAddress) -> Option<Expression<R>> {
 /// register, …); `ty` describes how to interpret them.
 #[derive(Clone)]
 pub struct Variable {
-    debugger: WeakRef<Debugger>,
+    context: EvaluationContext,
     name: String,
     pieces: Vec<gimli::Piece<R>>,
     ty: Type,
@@ -74,21 +73,21 @@ pub struct Variable {
 
 impl Variable {
     pub fn new(
-        debugger: WeakRef<Debugger>,
+        context: EvaluationContext,
         name: String,
         pieces: Vec<gimli::Piece<R>>,
         ty: Type,
     ) -> Self {
         Variable {
-            debugger: debugger.clone(),
+            context,
             name,
             pieces,
             ty,
         }
     }
 
-    pub(crate) fn debugger(&self) -> Option<&Debugger> {
-        self.debugger.as_deref()
+    pub fn debugger(&self) -> Option<&Debugger> {
+        self.context.debugger()
     }
 
     pub fn name(&self) -> &str {
@@ -138,10 +137,9 @@ impl Variable {
         // TODO: Handling for multi-piece value, not just `first()`
         let piece = self.pieces.first()?;
         let mut bytes = match &piece.location {
-            gimli::Location::Address { address } => self
-                .debugger()?
-                .memory()
-                .read_memory(GlobalAddress(*address), len),
+            gimli::Location::Address { address } => {
+                self.debugger()?.memory().read(GlobalAddress(*address), len)
+            }
             gimli::Location::Value { value } => value_to_le_bytes(*value, len),
             gimli::Location::Bytes { value } => value.to_slice().ok()?.to_vec(),
             _ => Vec::default(),
@@ -298,7 +296,7 @@ impl Variable {
 
         // Clone the variable with the new contents
         Self {
-            debugger: self.debugger.clone(),
+            context: self.context.clone(),
             name: Default::default(),
             pieces,
             ty: self.ty.clone(),

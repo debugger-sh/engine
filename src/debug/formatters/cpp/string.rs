@@ -62,7 +62,7 @@ impl StdStringFormatter {
                 }
             }
             let buf = inline.address().context("__s.__data_ address")?;
-            return Ok(dbg.memory().read_memory(buf, len));
+            return Ok(dbg.memory().read(buf, len));
         }
 
         let l = rep.child_with_name("__l").context("__l")?;
@@ -74,7 +74,7 @@ impl StdStringFormatter {
             .child_with_name("__size_")
             .and_then(|f| f.unsigned_value())
             .context("__l.__size_")? as usize;
-        Ok(dbg.memory().read_memory(data, len))
+        Ok(dbg.memory().read(data, len))
     }
 }
 

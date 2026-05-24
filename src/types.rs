@@ -271,7 +271,7 @@ impl MemoryDescriptor {
         buffer.byte_length() as usize
     }
 
-    pub fn read_memory(&self, addr: GlobalAddress, len: usize) -> Vec<u8> {
+    pub fn read(&self, addr: GlobalAddress, len: usize) -> Vec<u8> {
         let offset = addr.0 as usize;
         let memory_buffer = self.memory.buffer();
         let buffer = memory_buffer.unchecked_ref::<js_sys::ArrayBuffer>();
@@ -290,8 +290,14 @@ impl MemoryDescriptor {
         out
     }
 
-    pub fn read_pointer(&self, addr: GlobalAddress) -> GlobalAddress {
-        u32::from_le_bytes(self.read_memory(addr, 4).try_into().unwrap_or([0; 4])).into()
+    pub fn read_u64(&self, addr: GlobalAddress) -> u64 {
+        let bytes = self.read(addr, 8);
+        u64::from_le_bytes(bytes.try_into().unwrap()).into()
+    }
+
+    pub fn read_u32(&self, addr: GlobalAddress) -> u32 {
+        let bytes = self.read(addr, 4);
+        u32::from_le_bytes(bytes.try_into().unwrap()).into()
     }
 }
 

@@ -1,12 +1,14 @@
+use std::cell::OnceCell;
 use std::rc::Rc;
 
-use crate::debug::dwarf::Location;
+use crate::debug::dwarf::{Die, Location, R};
 use crate::debug::formatters::{self, VariableFormatter};
 use crate::debug::{Type, TypeGraph, Variable, get_location, get_variables as debug_get_variables};
 use crate::types::{
     BreakpointMode, DebugFunction, DebugInfo, GlobalAddress, MemoryDescriptor, WasmLocation,
 };
 use crate::util::{Ref, WeakRef};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 
@@ -29,6 +31,7 @@ pub struct StackFrame {
 /// This allows us to, for example, try all user formatters before trying
 /// all standard library formatters before all core formatters, etc.
 pub struct FormatterCategory {
+    #[allow(dead_code)]
     name: &'static str,
     formatters: Vec<Rc<dyn VariableFormatter>>,
 }
@@ -110,19 +113,6 @@ impl Debugger {
         }
 
         None
-    }
-
-    fn read_wasm_value(
-        &self,
-        view: &js_sys::DataView,
-        frame_pos: u32,
-        func: &DebugFunction,
-        loc: &WasmLocation,
-    ) -> Option<gimli::Value> {
-        let entry = func.layout.iter().find(|e| &e.location == loc)?;
-        let offset = (frame_pos as usize) + entry.offset;
-        let raw = view.get_uint32_endian(offset, true) as u64;
-        Some(gimli::Value::Generic(raw))
     }
 
     fn stack_view(&self) -> (js_sys::DataView, u32, u32) {
@@ -207,11 +197,8 @@ impl Debugger {
         Some(loc)
     }
 
-    /// Walks the debug stack to the Nth frame and returns (position, pc, func).
-    fn frame_at(
-        &self,
-        frame_id: u32,
-    ) -> Option<(u32, GlobalAddress, &crate::types::DebugFunction)> {
+    /// Walks the debug stack to find the offset of the Nth stack frame
+    fn frame_offset_at(&self, frame_id: u32) -> Option<u32> {
         let (view, sp, stack_top) = self.stack_view();
         let mut pos = sp;
 
@@ -227,97 +214,8 @@ impl Debugger {
         if pos >= stack_top {
             return None;
         }
-        let pc = GlobalAddress(view.get_uint32_endian(pos as usize, true) as u64);
-        let func = self.info.fn_at(pc)?;
-        Some((pos, pc, func))
-    }
 
-    /// Evaluates a DWARF expression, satisfying any wasm-location and
-    /// frame-base requests by reading the function's debug stack frame.
-    ///
-    /// Returns an empty vector if the expression yields a request kind we
-    /// don't know how to fulfil (e.g. `RequiresMemory`).
-    fn evaluate_expr(
-        &self,
-        expr: gimli::Expression<crate::debug::dwarf::R>,
-        encoding: gimli::Encoding,
-        view: &js_sys::DataView,
-        pos: u32,
-        func: &DebugFunction,
-        frame_base: Option<u64>,
-    ) -> Vec<gimli::Piece<crate::debug::dwarf::R>> {
-        let mut eval = expr.evaluation(encoding);
-        loop {
-            match eval.evaluate() {
-                Ok(gimli::EvaluationResult::Complete) => return eval.result(),
-                Ok(gimli::EvaluationResult::RequiresWasmLocal { index }) => {
-                    let Some(val) =
-                        self.read_wasm_value(view, pos, func, &WasmLocation::Local(index as usize))
-                    else {
-                        return vec![];
-                    };
-                    if eval.resume_with_wasm_value(val).is_err() {
-                        return vec![];
-                    }
-                }
-                Ok(gimli::EvaluationResult::RequiresWasmGlobal { index }) => {
-                    let Some(val) = self.read_wasm_value(
-                        view,
-                        pos,
-                        func,
-                        &WasmLocation::Global(index as usize),
-                    ) else {
-                        return vec![];
-                    };
-                    if eval.resume_with_wasm_value(val).is_err() {
-                        return vec![];
-                    }
-                }
-                Ok(gimli::EvaluationResult::RequiresWasmStack { index }) => {
-                    let Some(val) = self.read_wasm_value(
-                        view,
-                        pos,
-                        func,
-                        &WasmLocation::Operand(index as usize),
-                    ) else {
-                        return vec![];
-                    };
-                    if eval.resume_with_wasm_value(val).is_err() {
-                        return vec![];
-                    }
-                }
-                Ok(gimli::EvaluationResult::RequiresFrameBase) => {
-                    let Some(fb) = frame_base else {
-                        return vec![];
-                    };
-                    if eval.resume_with_frame_base(fb).is_err() {
-                        return vec![];
-                    }
-                }
-                _ => return vec![],
-            }
-        }
-    }
-
-    /// Evaluates the function's `DW_AT_frame_base` expression and reduces the
-    /// resulting pieces to a single u64 the variable evaluator can use.
-    fn frame_base(
-        &self,
-        die: &crate::debug::dwarf::Die<'_>,
-        pc: GlobalAddress,
-        encoding: gimli::Encoding,
-        view: &js_sys::DataView,
-        pos: u32,
-        func: &DebugFunction,
-    ) -> Option<u64> {
-        let expr = die.expression(gimli::DW_AT_frame_base, pc)?;
-        let pieces = self.evaluate_expr(expr, encoding, view, pos, func, None);
-        let piece = pieces.first()?;
-        match &piece.location {
-            gimli::Location::Value { value } => Some(gimli_value_to_u64(*value)),
-            gimli::Location::Address { address } => Some(*address),
-            _ => None,
-        }
+        Some(pos)
     }
 
     /// Returns the variables visible in `frame_id`, split into `(arguments, locals)`.
@@ -326,44 +224,47 @@ impl Debugger {
     /// `DW_TAG_variable` (the modern tag) or `DW_TAG_local_variable`. Variables
     /// whose location expression cannot be resolved (e.g. optimized out /
     /// require unsupported opcodes) are dropped.
-    pub fn get_variables(&self, frame_id: u32) -> (Vec<Variable>, Vec<Variable>) {
-        let Some((pos, pc, func)) = self.frame_at(frame_id) else {
-            return (Vec::new(), Vec::new());
-        };
-        let Ok(die) = func.die_ref.deref(&self.info.dwarf) else {
-            return (Vec::new(), Vec::new());
-        };
+    pub fn get_variables(&self, frame_id: u32) -> Result<VariablesResult> {
+        let frame_offset = self
+            .frame_offset_at(frame_id)
+            .context(format!("Could not find frame offset for frame {frame_id}"))?;
 
-        let (view, _, _) = self.stack_view();
+        let context = EvaluationContext::new(self.me.clone(), frame_offset);
+        let DerivedEvaluationContext { pc, die, .. } = context.derived()?;
+
         let var_dies = debug_get_variables(&die, pc);
-        let encoding: gimli::Encoding = die.ctx().unit.unit().encoding();
-        let frame_base = self.frame_base(&die, pc, encoding, &view, pos, func);
-        let mut arguments = Vec::new();
-        let mut locals = Vec::new();
+        let mut variables = VariablesResult::default();
 
+        // TODO: How to better report errors for failed variable evaluations in this loop?
+        // What should happen if we fail to get a variables name/type/pieces/etc.?
         for var_die in &var_dies {
             let name = var_die.name().unwrap_or_default();
-            let Some(expr) = get_location(var_die, pc) else {
-                continue;
-            };
 
-            let pieces = self.evaluate_expr(expr, encoding, &view, pos, func, frame_base);
-            if pieces.is_empty() {
-                continue;
-            }
             let Some(type_id) = var_die.type_ref() else {
                 continue;
             };
 
-            let variable = Variable::new(self.me.clone(), name, pieces, self.types.get(type_id));
+            let ty = self.types.get(type_id);
 
+            let Some(expr) = get_location(var_die, pc) else {
+                continue;
+            };
+
+            let Ok(pieces) = context.evaluate(expr) else {
+                continue;
+            };
+
+            let variable = Variable::new(context.clone(), name, pieces, ty);
             match var_die.tag() {
-                gimli::DW_TAG_formal_parameter => arguments.push(variable),
-                gimli::DW_TAG_variable | gimli::DW_TAG_local_variable => locals.push(variable),
+                gimli::DW_TAG_formal_parameter => variables.arguments.push(variable),
+                gimli::DW_TAG_variable | gimli::DW_TAG_local_variable => {
+                    variables.locals.push(variable)
+                }
                 _ => {}
             }
         }
-        (arguments, locals)
+
+        Ok(variables)
     }
 
     /// Borrow of the underlying [`DebugInfo`], used by handlers that need to
@@ -372,8 +273,14 @@ impl Debugger {
         &self.info
     }
 
+    /// A reference to the program's linear memory
     pub fn memory(&self) -> &MemoryDescriptor {
         &self.info.memory
+    }
+
+    /// A reference to the debugger's debug stack
+    pub fn stack(&self) -> &MemoryDescriptor {
+        &self.info.stack
     }
 
     /// Returns the size of an address in bytes on the current platform.
@@ -412,17 +319,150 @@ impl Debugger {
     }
 }
 
-fn gimli_value_to_u64(v: gimli::Value) -> u64 {
-    match v {
-        gimli::Value::Generic(x) => x,
-        gimli::Value::I8(x) => x as i64 as u64,
-        gimli::Value::U8(x) => x as u64,
-        gimli::Value::I16(x) => x as i64 as u64,
-        gimli::Value::U16(x) => x as u64,
-        gimli::Value::I32(x) => x as i64 as u64,
-        gimli::Value::U32(x) => x as u64,
-        gimli::Value::I64(x) => x as u64,
-        gimli::Value::U64(x) => x,
-        gimli::Value::F32(_) | gimli::Value::F64(_) => 0,
+// ╭──────────────────────────────────────────────────────────────────────────╮
+// │ Variable Evaluation                                                      │
+// ╰──────────────────────────────────────────────────────────────────────────╯
+
+/// Contains all state needed to evaluate a [gimli::Expression].
+#[derive(Clone)]
+pub struct EvaluationContext {
+    /// A reference to the debugger that triggered the evaluation
+    debugger: WeakRef<Debugger>,
+    /// The debug stack offset to the beginning of the stack frame
+    /// where evaluations occur
+    offset: u32,
+    /// The cached frame base to use across evaluations.
+    fb: OnceCell<u64>,
+}
+
+pub struct DerivedEvaluationContext<'a> {
+    pub pc: GlobalAddress,
+    pub func: &'a DebugFunction,
+    pub die: Die<'a>,
+}
+
+#[derive(Default)]
+pub struct VariablesResult {
+    pub arguments: Vec<Variable>,
+    pub locals: Vec<Variable>,
+    pub globals: Vec<Variable>,
+}
+
+impl EvaluationContext {
+    pub fn new(debugger: WeakRef<Debugger>, offset: u32) -> Self {
+        Self {
+            debugger,
+            offset,
+            fb: Default::default(),
+        }
+    }
+
+    /// Get a reference to the underlying debugger, if it exists.
+    pub fn debugger(&self) -> Option<&Debugger> {
+        self.debugger.as_deref()
+    }
+
+    /// Get the derived info (PC, DIE, etc.) from this evaluation context
+    pub fn derived(&self) -> Result<DerivedEvaluationContext<'_>> {
+        let debugger = self
+            .debugger
+            .as_deref()
+            .context("Cannot evaluate expression without debugger")?;
+
+        let pc: GlobalAddress = debugger.stack().read_u32(self.offset.into()).into();
+
+        let func = debugger
+            .info()
+            .fn_at(pc)
+            .context(format!("Could not find function for pc {pc}"))?;
+
+        let die = func.die_ref.deref(&debugger.info().dwarf)?;
+
+        Ok(DerivedEvaluationContext { pc, func, die })
+    }
+
+    /// Evaluates an expression and returns the result as an unsigned value, if possible.
+    ///
+    /// **Note:** Values are sign extended if the resulting value is signed.
+    pub fn evaluate_unsigned(&self, expr: gimli::Expression<R>) -> Result<u64> {
+        // TODO: How does this method interact with multi-piece values?
+        let pieces = self.evaluate(expr)?;
+        let piece = pieces.first().context("Evaluation resulted in no pieces")?;
+        match &piece.location {
+            gimli::Location::Value { value } => Ok(value.to_u64(u64::MAX)?),
+            gimli::Location::Address { address } => Ok(*address),
+            _ => anyhow::bail!(
+                "Could not determine value from piece location {:?}",
+                piece.location
+            ),
+        }
+    }
+
+    /// Evaluates an expression and returns the result as a signed value, if possible.
+    ///
+    /// **Note:** Unsigned values greater than or equal to [u32::MAX] will overflow.
+    pub fn evaluate_signed(&self, expr: gimli::Expression<R>) -> Result<i64> {
+        Ok(self.evaluate_unsigned(expr)? as i64)
+    }
+
+    /// Evaluates an expression and returns the resulting pieces.
+    pub fn evaluate(&self, expr: gimli::Expression<R>) -> Result<Vec<gimli::Piece<R>>> {
+        let DerivedEvaluationContext { pc, die, func } = self.derived()?;
+        let encoding = die.ctx().unit.encoding();
+        let mut eval = expr.evaluation(encoding);
+
+        loop {
+            let result = eval.evaluate()?;
+            match result {
+                gimli::EvaluationResult::Complete => return Ok(eval.result()),
+                gimli::EvaluationResult::RequiresWasmLocal { index } => {
+                    eval.resume_with_wasm_value(
+                        self.wasm_value(func, &WasmLocation::Local(index as usize))?,
+                    )?;
+                }
+                gimli::EvaluationResult::RequiresWasmStack { index } => {
+                    eval.resume_with_wasm_value(
+                        self.wasm_value(func, &WasmLocation::Operand(index as usize))?,
+                    )?;
+                }
+                gimli::EvaluationResult::RequiresWasmGlobal { index } => {
+                    eval.resume_with_wasm_value(
+                        self.wasm_value(func, &WasmLocation::Operand(index as usize))?,
+                    )?;
+                }
+                gimli::EvaluationResult::RequiresFrameBase => {
+                    if let Some(fb) = self.fb.get() {
+                        eval.resume_with_frame_base(*fb)?;
+                    } else {
+                        let expr = die
+                            .expression(gimli::DW_AT_frame_base, pc)
+                            .context("Required DW_AT_frame_base missing on function")?;
+                        let fb = self.evaluate_unsigned(expr)?;
+                        eval.resume_with_frame_base(*self.fb.get_or_init(|| fb))?;
+                    }
+                }
+                _ => anyhow::bail!("Could not execute evaluation step {result:?}"),
+            }
+        }
+    }
+
+    fn wasm_value(&self, func: &DebugFunction, loc: &WasmLocation) -> Result<gimli::Value> {
+        let entry = func
+            .layout
+            .iter()
+            .find(|e| &e.location == loc)
+            .context(format!(
+                "Location {loc:?} could not be found in function {func:?}"
+            ))?;
+
+        let debugger = self
+            .debugger
+            .as_deref()
+            .context("Cannot determine wasm value without debugger")?;
+
+        let offset = (self.offset as usize) + entry.offset;
+        Ok(gimli::Value::Generic(
+            debugger.stack().read_u64(offset.into()),
+        ))
     }
 }
