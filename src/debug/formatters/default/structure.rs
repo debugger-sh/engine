@@ -46,7 +46,8 @@ impl VariableFormatter for StructureFormatter {
                     };
 
                     let offset = match &member.location {
-                        Some(val) => val.compute(value.context())?,
+                        Some(Value::Constant(v)) => *v,
+                        Some(Value::Expr(expr)) => value.context().evaluate_signed(expr.clone())?,
                         None => 0,
                     };
 
