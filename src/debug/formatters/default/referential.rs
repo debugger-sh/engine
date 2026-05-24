@@ -15,7 +15,7 @@ impl VariableFormatter for ReferentialFormatter {
     fn display(&self, value: &Variable) -> Result<String> {
         match value.ty().resolved() {
             Some(TypeDeclaration::Referential { target, kind, .. }) => match kind {
-                ReferenceKind::Pointer => Ok(match value.address() {
+                ReferenceKind::Pointer => Ok(match value.pointer_value() {
                     Some(addr) => addr.to_string(),
                     None => "<unavailable>".into(),
                 }),
