@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 
 use crate::{
     debug::{
-        Debugger,
+        Debugger, EvaluationContext,
         dwarf::{Die, DieReference, Dwarf, R},
         formatters::VariableFormatter,
     },
@@ -59,6 +59,15 @@ pub struct TypeGraph {
 pub enum Value {
     Constant(i64),
     Expr(gimli::Expression<R>),
+}
+
+impl Value {
+    pub fn compute(&self, context: &EvaluationContext) -> Result<i64> {
+        match self {
+            Value::Constant(value) => Ok(*value),
+            Value::Expr(expr) => context.evaluate_signed(expr.clone()),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

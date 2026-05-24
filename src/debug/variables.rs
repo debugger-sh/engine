@@ -86,6 +86,10 @@ impl Variable {
         }
     }
 
+    pub fn context(&self) -> &EvaluationContext {
+        &self.context
+    }
+
     pub fn debugger(&self) -> Option<&Debugger> {
         self.context.debugger()
     }
@@ -235,9 +239,8 @@ impl Variable {
         // TODO: This code is duplicated by the structure formatter
         // Eventually might want to coalesce this somehow if the logic gets more complicated
         let offset = match &member.location {
-            Some(super::Value::Constant(o)) => *o,
+            Some(val) => val.compute(self.context()).ok()?,
             None => 0,
-            Some(super::Value::Expr(_)) => return None,
         };
 
         Some(

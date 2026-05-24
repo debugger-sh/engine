@@ -49,9 +49,8 @@ impl VariableFormatter for StructureFormatter {
                     };
 
                     let offset = match &member.location {
-                        Some(Value::Constant(o)) => *o,
+                        Some(val) => val.compute(value.context())?,
                         None => 0,
-                        Some(Value::Expr(_)) => continue,
                     };
 
                     out.push(
