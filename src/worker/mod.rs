@@ -287,11 +287,11 @@ async fn start_rust(is_debug: bool, sources: Vec<String>, exec: Execution, fs: m
 
         let mut step = exec
             .step("rustc")
-            .binary("https://github.com/debugger-sh/rust/releases/download/debugger-sh-2026-05-30/rustc.wasm")
+            .binary("https://debugger-sh.github.io/engine/rustc.wasm")
             .args(&rustc_args);
         if let Some(fs) = union_fs.take() {
             step = step
-                .sysroot("https://github.com/debugger-sh/rust/releases/download/debugger-sh-2026-05-30/sysroot.tar.gz")
+                .sysroot("https://debugger-sh.github.io/engine/rust-sysroot.tar.gz")
                 .fs(fs);
         }
         let exit = step.run().await.expect("Compilation succeeded");
