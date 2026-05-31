@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::{Error, FnInstrumenter, InstrResult};
 use crate::{
-    debug::dwarf::{Dwarf, Location},
+    debug::dwarf::{Dwarf, Location, Visit},
     types::{BP_PREFIX_BYTES, DebugFunction, DebugInfo, GlobalAddress, MemoryDescriptor},
     util::supports_wasm_multi_memory,
 };
@@ -75,23 +75,26 @@ fn parse_debug_functions(dwarf: &Dwarf) -> Vec<DebugFunction> {
                 return Vec::new();
             };
 
-            root.collect_children(|child| {
+            let mut result = Vec::new();
+            root.traverse(|child| {
                 if child.tag() != gimli::DW_TAG_subprogram {
-                    return None;
+                    return Visit::Continue;
                 }
 
                 let Some((low_pc, high_pc)) = child.addr_range() else {
-                    return None;
+                    return Visit::Continue;
                 };
 
-                Some(DebugFunction {
+                result.push(DebugFunction {
                     low_pc,
                     high_pc,
                     die_ref: child.die_ref(),
                     size: 0,
                     layout: Vec::default(),
-                })
-            })
+                });
+                Visit::Continue
+            });
+            result
         })
         .collect::<Vec<DebugFunction>>();
     fns.sort_by_key(|f| f.low_pc);

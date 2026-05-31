@@ -37,12 +37,15 @@ export type ExpectStep = {
 };
 export type Step = RequestStep | ResponseStep | EventStep | ExpectStep;
 
-type TestFile = { steps: Step[] };
+type TestFile = { steps: Step[]; lang?: Lang };
+
+export type Lang = 'c' | 'rust';
 
 export type BackendOptions = {
   testDir: string;
   testOutputDir: string;
   fsNode: Record<string, Json>;
+  lang: Lang;
 };
 
 export interface Backend {
@@ -82,7 +85,7 @@ const COMMON_INIT_STEPS: Step[] = [
       stopOnEntry: false
     }
   },
-  { type: 'event', event: 'initialized', $timeout: 10000 }
+  { type: 'event', event: 'initialized', $timeout: 20000 }
 ];
 
 type CliOpts = {
@@ -294,7 +297,12 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
   await mkdir(testOutputDir, { recursive: true });
 
   const fsNode = await collectFsNode(testDir);
-  const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode };
+  const backendOpts: BackendOptions = {
+    testDir,
+    testOutputDir,
+    fsNode,
+    lang: file.lang ?? 'c'
+  };
   const backend = opts.lldb
     ? await createLldbBackend(backendOpts)
     : await createEngineBackend(backendOpts);

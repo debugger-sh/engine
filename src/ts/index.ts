@@ -17,7 +17,7 @@ if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
   for (const url of LLVM_PREFETCH_URLS) void fetch(url, { cache: 'force-cache' });
 }
 
-export type Lang = 'c';
+export type Lang = 'c' | 'rust';
 
 /** The engine ran to completion with the provided `exitCode`. */
 export type CompletedResult = { type: 'completed'; exitCode: number };
@@ -114,6 +114,7 @@ export class Engine {
 
         const message: WorkerStart = {
           fs: this.fs,
+          lang: this.lang,
           stdin_buffer: this.stdin[Internals].buffer,
           is_debug: this.debugger.enabled
         };
