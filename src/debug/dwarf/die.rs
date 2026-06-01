@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -71,6 +72,17 @@ impl<'a> Die<'a> {
 
     pub fn name(&self) -> Option<String> {
         self.attr_to_string(gimli::DW_AT_name)
+    }
+
+    pub fn decl_file(&self) -> Option<&PathBuf> {
+        let attr = self.attr(gimli::DW_AT_decl_file)?;
+        let index = match attr.value() {
+            gimli::AttributeValue::FileIndex(index) => index as usize,
+            gimli::AttributeValue::Udata(index) => index as usize,
+            _ => return None,
+        };
+
+        self.ctx.unit.file_at(index)
     }
 
     /// Returns the qualified name of this entry which includes
