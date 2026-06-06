@@ -7,17 +7,18 @@ import { Debugger } from './debugger';
 import { errorResult, Internals } from './util';
 import RustWorker from './worker?worker&inline';
 
-// Warms the browser HTTP cache at module load so the worker's fetch on run() hits cache.
-const LLVM_PREFETCH_URLS = [
-  'https://fabioibanez.github.io/website/llvm.core.wasm',
-  'https://fabioibanez.github.io/website/llvm-resources.tar.gz'
-];
+export type Lang = 'c' | 'python';
 
-if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-  for (const url of LLVM_PREFETCH_URLS) void fetch(url, { cache: 'force-cache' });
-}
-
-export type Lang = 'c';
+const PREFETCH_URLS: Record<Lang, string[]> = {
+  c: [
+    'https://fabioibanez.github.io/website/llvm.core.wasm',
+    'https://fabioibanez.github.io/website/llvm-resources.tar.gz'
+  ],
+  python: [
+    'https://runno.dev/langs/python-3.11.3.wasm',
+    'https://runno.dev/langs/python-3.11.3.tar.gz'
+  ]
+};
 
 /** The engine ran to completion with the provided `exitCode`. */
 export type CompletedResult = { type: 'completed'; exitCode: number };
@@ -58,6 +59,8 @@ export class Engine {
 
   static async create(lang: Lang): Promise<Engine> {
     await init({ module_or_path: wasmBinary });
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
+      for (const url of PREFETCH_URLS[lang] ?? []) void fetch(url, { cache: 'force-cache' });
     return new Engine(lang);
   }
 
@@ -115,7 +118,8 @@ export class Engine {
         const message: WorkerStart = {
           fs: this.fs,
           stdin_buffer: this.stdin[Internals].buffer,
-          is_debug: this.debugger.enabled
+          is_debug: this.debugger.enabled,
+          lang: this.lang
         };
         worker.postMessage(message);
       });

@@ -63,6 +63,13 @@ pub enum FsNode {
     Dir(HashMap<String, FsNode>),
 }
 
+#[derive(Debug, Clone, Copy, Tsify, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Lang {
+    C,
+    Python,
+}
+
 #[derive(Debug, Tsify, Deserialize)]
 pub struct WorkerStart {
     pub fs: HashMap<String, FsNode>,
@@ -70,6 +77,7 @@ pub struct WorkerStart {
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub stdin_buffer: js_sys::SharedArrayBuffer,
     pub is_debug: bool,
+    pub lang: Lang,
 }
 
 #[derive(Clone, Copy, Debug, Tsify, Serialize_repr)]

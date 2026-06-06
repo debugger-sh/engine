@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, create_dir_all, mem_fs};
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
-use crate::types::{FsNode, WorkerOut, WorkerStart};
+use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};
 
 mod debuggee;
 mod execution;
@@ -87,7 +87,41 @@ fn collect_dir_sources(
 // │ Worker                                                                   │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
+const PYTHON_WASM_URL: &str = "https://runno.dev/langs/python-3.11.3.wasm";
+const PYTHON_STDLIB_URL: &str = "https://runno.dev/langs/python-3.11.3.tar.gz";
+
 async fn start(msg: WorkerStart) {
+    match msg.lang {
+        Lang::C => start_cpp(msg).await,
+        Lang::Python => start_python(msg).await,
+    }
+}
+
+async fn start_python(msg: WorkerStart) {
+    let fs = create_user_fs(FsNode::Dir(msg.fs))
+        .await
+        .expect("created user files filesystem");
+
+    let exec = Execution::new(msg.stdin_buffer);
+
+    let exit = exec
+        .step("python")
+        .binary(PYTHON_WASM_URL)
+        .sysroot(PYTHON_STDLIB_URL)
+        .fs(Box::new(fs))
+        .args(["/main.py"])
+        .envs([
+            ("PYTHONUNBUFFERED", "1"),
+            ("PYTHONDONTWRITEBYTECODE", "1"),
+        ])
+        .run()
+        .await
+        .expect("Python execution succeeded");
+
+    WorkerOut::Stop { exit_code: exit.raw() }.send();
+}
+
+async fn start_cpp(msg: WorkerStart) {
     let mut sources = Vec::new();
     collect_dir_sources(&msg.fs, &PathBuf::from("/"), &mut sources);
     sources.sort();
