@@ -1,7 +1,7 @@
 use console_error_panic_hook;
 use std::path::PathBuf;
 use wasm_bindgen::prelude::*;
-use wasmer_wasix::virtual_fs::{FileSystem, create_dir_all, mem_fs};
+use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, create_dir_all, mem_fs};
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};

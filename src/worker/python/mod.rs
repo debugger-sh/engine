@@ -1,6 +1,6 @@
 mod debuggee;
 
-use wasmer_wasix::virtual_fs::{AsyncWriteExt, mem_fs};
+use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, mem_fs};
 
 use crate::types::{FsNode, WorkerOut, WorkerStart};
 
