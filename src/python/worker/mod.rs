@@ -3,8 +3,8 @@ mod debuggee;
 use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, mem_fs};
 
 use crate::types::{FsNode, WorkerOut, WorkerStart};
+use crate::worker::execution::Execution;
 
-use super::execution::Execution;
 use debuggee::PythonDebuggee;
 
 const WASM_URL: &str = "https://runno.dev/langs/python-3.11.3.wasm";
@@ -23,7 +23,7 @@ async fn write_file(fs: &mem_fs::FileSystem, path: &str, contents: &str) {
 }
 
 pub async fn start(msg: WorkerStart) {
-    let fs = super::create_user_fs(FsNode::Dir(msg.fs))
+    let fs = crate::worker::create_user_fs(FsNode::Dir(msg.fs))
         .await
         .expect("created user files filesystem");
 

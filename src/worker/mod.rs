@@ -7,9 +7,8 @@ use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};
 
 mod debuggee;
-mod execution;
+pub(crate) mod execution;
 mod io;
-mod python;
 mod runtime;
 
 use execution::Execution;
@@ -18,7 +17,7 @@ use execution::Execution;
 // │ Helpers                                                                  │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-pub(super) async fn create_user_fs(node: FsNode) -> Result<mem_fs::FileSystem, std::io::Error> {
+pub(crate) async fn create_user_fs(node: FsNode) -> Result<mem_fs::FileSystem, std::io::Error> {
     let fs = mem_fs::FileSystem::default();
     create_user_fs_rec(&fs, &PathBuf::from("/"), &node).await?;
     Ok(fs)
@@ -94,7 +93,7 @@ const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resourc
 async fn start(msg: WorkerStart) {
     match msg.lang {
         Lang::C => start_cpp(msg).await,
-        Lang::Python => python::start(msg).await,
+        Lang::Python => crate::python::worker::start(msg).await,
     }
 }
 
