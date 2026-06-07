@@ -90,6 +90,9 @@ fn collect_dir_sources(
 const PYTHON_WASM_URL: &str = "https://runno.dev/langs/python-3.11.3.wasm";
 const PYTHON_STDLIB_URL: &str = "https://runno.dev/langs/python-3.11.3.tar.gz";
 
+const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm"
+const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz"
+
 async fn start(msg: WorkerStart) {
     match msg.lang {
         Lang::C => start_cpp(msg).await,
@@ -182,11 +185,11 @@ async fn start_cpp(msg: WorkerStart) {
         let mut step = exec
             .step("clang")
             // from @yowasp
-            .binary("https://fabioibanez.github.io/website/llvm.core.wasm")
+            .binary(CPP_WASM_URL)
             .args(&clang_args);
         if let Some(fs) = union_fs.take() {
             step = step
-                .sysroot("https://fabioibanez.github.io/website/llvm-resources.tar.gz")
+                .sysroot(CPP_STDLIB_URL)
                 .fs(fs);
         }
         let exit = step.run().await.expect("Compilation succeeded");
