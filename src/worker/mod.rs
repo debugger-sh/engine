@@ -90,8 +90,8 @@ fn collect_dir_sources(
 const PYTHON_WASM_URL: &str = "https://runno.dev/langs/python-3.11.3.wasm";
 const PYTHON_STDLIB_URL: &str = "https://runno.dev/langs/python-3.11.3.tar.gz";
 
-const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm"
-const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz"
+const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm";
+const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz";
 
 async fn start(msg: WorkerStart) {
     match msg.lang {
