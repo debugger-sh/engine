@@ -2,7 +2,7 @@ use super::{InstrResult, Instrumenter};
 use crate::debug::dwarf::R;
 use crate::debug::instrument::InstrError;
 use crate::debug::{get_location, get_variables};
-use crate::types::{DebugFunction, GlobalAddress, WasmLocation};
+use crate::types::{CodeOffset, DebugFunction, WasmLocation};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use wasm_encoder::reencode::Reencode;
 use wasm_encoder::{Instruction, MemArg, reencode};
@@ -128,17 +128,17 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
         self.stack_intructions.push(instr_count + 1);
     }
 
-    fn emit_call(&mut self, pc: GlobalAddress, op: wasmparser::Operator<'b>) -> InstrResult {
+    fn emit_call(&mut self, pc: CodeOffset, op: wasmparser::Operator<'b>) -> InstrResult {
         self.instructions.extend([
             Instruction::GlobalGet(self.instr.sp_gl_index),
-            Instruction::I32Const(pc.0 as i32),
+            Instruction::I32Const(u32::from(pc) as i32),
         ]);
         self.emit_store(ValType::I32, 0);
         self.emit_op(op)?;
         Ok(())
     }
 
-    fn locations_at(&self, pc: GlobalAddress) -> InstrResult<WasmLocations> {
+    fn locations_at(&self, pc: CodeOffset) -> InstrResult<WasmLocations> {
         let fun = self
             .func()
             .die_ref
@@ -176,7 +176,7 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
         Ok(locs)
     }
 
-    fn emit_bkpt(&mut self, loc_idx: usize, pc: GlobalAddress) -> InstrResult {
+    fn emit_bkpt(&mut self, loc_idx: usize, pc: CodeOffset) -> InstrResult {
         // High-level goal:
         // Loop through all variables of the function.
         // For every variable with an active location at this point in the

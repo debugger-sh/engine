@@ -5,7 +5,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 
 use crate::util::weak_error;
-use crate::{debug::NamespaceHierarchy, types::GlobalAddress};
+use crate::{debug::NamespaceHierarchy, types::CodeOffset};
 
 use super::{Dwarf, R, Unit};
 use gimli::Reader;
@@ -136,18 +136,18 @@ impl<'a> Die<'a> {
         }
     }
 
-    pub fn addr_range(&self) -> Option<(GlobalAddress, GlobalAddress)> {
+    pub fn addr_range(&self) -> Option<(CodeOffset, CodeOffset)> {
         let low_pc = self.attr(gimli::DW_AT_low_pc)?;
         let low_pc = weak_error!(self.ctx().unit_ref().attr_address(low_pc.value())).flatten()?;
-        let low_pc = GlobalAddress(low_pc);
+        let low_pc = low_pc.into();
 
         let high_pc = self.attr(gimli::DW_AT_high_pc)?;
-        if let Some(offset) = high_pc.sdata_value() {
-            return Some((low_pc, GlobalAddress(low_pc.0 + offset as u64)));
+        if let Some(offset) = high_pc.udata_value() {
+            return Some((low_pc, (u64::from(low_pc) + offset).into()));
         }
 
         let high_pc = weak_error!(self.ctx().unit_ref().attr_address(high_pc.value())).flatten()?;
-        let high_pc = GlobalAddress(high_pc);
+        let high_pc = high_pc.into();
         return Some((low_pc, high_pc));
     }
 
@@ -175,13 +175,13 @@ impl<'a> Die<'a> {
         )
     }
 
-    pub fn expression(&self, attr: gimli::DwAt, pc: GlobalAddress) -> Option<gimli::Expression<R>> {
+    pub fn expression(&self, attr: gimli::DwAt, pc: CodeOffset) -> Option<gimli::Expression<R>> {
         let Some(attr) = self.attr_value(attr) else {
             return None;
         };
 
         let unit = self.ctx().unit_ref();
-        let addr = pc.0;
+        let addr: u64 = pc.into();
 
         match attr {
             gimli::AttributeValue::Exprloc(expr) => Some(expr),
