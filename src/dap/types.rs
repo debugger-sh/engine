@@ -14,6 +14,8 @@ pub enum VariableReference {
         /// The cached children counts for this variable to avoid recomputing them.
         counts: ChildCounts,
     },
+    /// Plain name/value pairs (e.g. Python locals) without DWARF backing.
+    Simple(Vec<(String, String)>),
 }
 
 /// Tracks variable handles handed out via DAP `variablesReference` IDs.
@@ -32,6 +34,11 @@ impl VariablesMap {
     /// Stores `vars` and returns a fresh non-zero `variablesReference`.
     pub fn allocate(&mut self, vars: Vec<Variable>) -> i64 {
         self.allocate_reference(VariableReference::List(vars))
+    }
+
+    /// Stores plain string variables and returns a fresh non-zero `variablesReference`.
+    pub fn allocate_simple(&mut self, vars: Vec<(String, String)>) -> i64 {
+        self.allocate_reference(VariableReference::Simple(vars))
     }
 
     /// Stores `var` and returns a fresh non-zero `variablesReference`.

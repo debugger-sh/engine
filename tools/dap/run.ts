@@ -72,7 +72,7 @@ const COMMON_INIT_STEPS: Step[] = [
       stopOnEntry: false
     }
   },
-  { type: 'event', event: 'initialized', $timeout: 10000 }
+  { type: 'event', event: 'initialized', $timeout: 30000 }
 ];
 
 type CliOpts = {

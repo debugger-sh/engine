@@ -1,11 +1,14 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use anyhow::{Context, Result, anyhow};
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::{Value, json};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 
 use crate::dap::types::{ProtocolMessage, VariableReference, VariablesMap};
 use crate::debug::formatters::ChildCounts;
@@ -13,9 +16,50 @@ use crate::debug::{Debugger, Variable};
 use crate::types::{DebugInfo, PauseReason};
 use crate::util::Ref;
 
+const PYTHON_DEBUG_HEADER: u32 = 12;
+
+#[derive(Debug, Clone, Deserialize)]
+struct PythonFrame {
+    file: String,
+    line: i64,
+    function: String,
+    locals: HashMap<String, String>,
+}
+
+struct PythonDebugState {
+    control: js_sys::Int32Array,
+    response: js_sys::Uint8Array,
+    frames: Option<Vec<PythonFrame>>,
+    breakpoints: HashMap<String, Vec<i64>>,
+}
+
+impl PythonDebugState {
+    fn from_sab(sab: js_sys::SharedArrayBuffer) -> Self {
+        Self {
+            control: js_sys::Int32Array::new_with_byte_offset_and_length(&sab, 0, 3),
+            response: js_sys::Uint8Array::new_with_byte_offset(&sab, PYTHON_DEBUG_HEADER),
+            frames: None,
+            breakpoints: HashMap::new(),
+        }
+    }
+
+    fn send_command(&self, cmd: i32) {
+        let json = json!({ "cmd": cmd, "breakpoints": self.breakpoints }).to_string();
+        let bytes = json.as_bytes();
+        let len = bytes.len().min(self.response.length() as usize) as u32;
+        self.response
+            .set(&js_sys::Uint8Array::from(&bytes[..len as usize]), 0);
+        js_sys::Atomics::store(&self.control, 2, len as i32).expect("stored response length");
+        js_sys::Atomics::store(&self.control, 1, cmd).expect("stored command");
+        js_sys::Atomics::store(&self.control, 0, 1).expect("stored resume signal");
+        js_sys::Atomics::notify(&self.control, 0).expect("notified python worker");
+    }
+}
+
 struct DapState {
     seq_counter: i64,
     debugger: Option<Ref<Debugger>>,
+    python_state: Option<PythonDebugState>,
     /// `initialize` request was handled and the client received the capabilities response.
     client_initialized: bool,
     /// We emitted `initialized` for this debug session (once per worker / run).
@@ -47,6 +91,10 @@ impl DapState {
     // interacts with wait_for_resume in the worker to unblock after config is done.
     fn handle_configuration_done(&mut self) -> Result<Value> {
         self.vars.clear();
+        if let Some(py) = &self.python_state {
+            py.send_command(0);
+            return Ok(Value::Null);
+        }
         self.debugger()
             .context("configurationDone: debugger not ready")?
             .continue_();
@@ -65,7 +113,7 @@ impl DapState {
         }))
     }
 
-    fn handle_set_breakpoints(&self, args: &Value) -> Result<Value> {
+    fn handle_set_breakpoints(&mut self, args: &Value) -> Result<Value> {
         let source = args
             .get("source")
             .and_then(|s| s.get("path"))
@@ -80,6 +128,15 @@ impl DapState {
                     .collect()
             })
             .unwrap_or_default();
+
+        if let Some(py) = &mut self.python_state {
+            py.breakpoints.insert(source.to_string(), lines.clone());
+            let bps: Vec<_> = lines
+                .iter()
+                .map(|line| json!({ "verified": true, "line": line }))
+                .collect();
+            return Ok(json!({ "breakpoints": bps }));
+        }
 
         let dbg = self.debugger().context("No debugger attached")?;
         // TODO: set_breakpoints. once implemented, verify this handler does the right thing with the results (e.g. line numbers, verified status)
@@ -98,6 +155,27 @@ impl DapState {
     }
 
     fn handle_stack_trace(&self) -> Result<Value> {
+        if let Some(py) = &self.python_state {
+            let frames = py.frames.as_ref().context("No Python frames")?;
+            let stack_frames: Vec<_> = frames
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    json!({
+                        "id": i as i64,
+                        "name": f.function,
+                        "line": f.line,
+                        "column": 0,
+                        "source": { "path": f.file }
+                    })
+                })
+                .collect();
+            return Ok(json!({
+                "stackFrames": stack_frames,
+                "totalFrames": frames.len()
+            }));
+        }
+
         let dbg = self.debugger().context("No debugger attached")?;
         let frames = dbg.backtrace().context("Failed to get backtrace")?;
         let total = frames.len();
@@ -122,7 +200,28 @@ impl DapState {
     }
 
     fn handle_scopes(&mut self, args: &Value) -> Result<Value> {
-        let frame_id = args.get("frameId").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
+        let frame_id = args.get("frameId").and_then(|v| v.as_i64()).unwrap_or(0) as usize;
+
+        if let Some(py) = &mut self.python_state {
+            let frames = py.frames.as_ref().context("No Python frames")?;
+            let frame = frames.get(frame_id).context("Invalid frame id")?;
+            let vars: Vec<(String, String)> = frame
+                .locals
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let reference = self.vars.allocate_simple(vars);
+            return Ok(json!({
+                "scopes": [{
+                    "name": "Locals",
+                    "variablesReference": reference,
+                    "expensive": false,
+                    "namedVariables": frame.locals.len()
+                }]
+            }));
+        }
+
+        let frame_id = frame_id as u32;
         let dbg = self.debugger().context("No debugger attached")?;
         let variables = dbg.get_variables(frame_id)?;
 
@@ -165,6 +264,22 @@ impl DapState {
             .get(reference)
             .context("Unknown variablesReference")?
             .clone();
+
+        if let VariableReference::Simple(entries) = reference {
+            let range = requested_range(args, entries.len());
+            let variables: Vec<_> = entries[range]
+                .iter()
+                .map(|(name, value)| {
+                    json!({
+                        "name": name,
+                        "value": value,
+                        "type": "",
+                        "variablesReference": 0
+                    })
+                })
+                .collect();
+            return Ok(json!({ "variables": variables }));
+        }
 
         let entries = requested_children(args, &reference)?;
         let variables: Result<Vec<_>> = entries
@@ -218,6 +333,10 @@ impl DapState {
 
     fn handle_continue(&mut self) -> Result<Value> {
         self.vars.clear();
+        if let Some(py) = &self.python_state {
+            py.send_command(0);
+            return Ok(json!({ "allThreadsContinued": true }));
+        }
         if let Some(dbg) = self.debugger() {
             dbg.continue_();
         }
@@ -226,6 +345,10 @@ impl DapState {
 
     fn handle_next(&mut self) -> Result<Value> {
         self.vars.clear();
+        if let Some(py) = &self.python_state {
+            py.send_command(1);
+            return Ok(json!({}));
+        }
         if let Some(dbg) = self.debugger() {
             dbg.step_over();
         }
@@ -234,6 +357,10 @@ impl DapState {
 
     fn handle_step_in(&mut self) -> Result<Value> {
         self.vars.clear();
+        if let Some(py) = &self.python_state {
+            py.send_command(2);
+            return Ok(json!({}));
+        }
         if let Some(dbg) = self.debugger() {
             dbg.step_into();
         }
@@ -242,6 +369,10 @@ impl DapState {
 
     fn handle_step_out(&mut self) -> Result<Value> {
         self.vars.clear();
+        if let Some(py) = &self.python_state {
+            py.send_command(3);
+            return Ok(json!({}));
+        }
         if let Some(dbg) = self.debugger() {
             dbg.step_out();
         }
@@ -274,6 +405,7 @@ fn requested_children(args: &Value, reference: &VariableReference) -> Result<Vec
     let filter = args.get("filter").and_then(|v| v.as_str());
 
     match reference {
+        VariableReference::Simple(_) => Err(anyhow!("Simple variables are not expandable")),
         VariableReference::List(entries) => {
             let range = requested_range(args, entries.len());
             match filter {
@@ -364,12 +496,13 @@ fn emit_event(state: &Rc<RefCell<DapState>>, event_name: &str, body: Option<Valu
 }
 
 /// DAP: `InitializedEvent` must be sent only after the `initialize` response was delivered,
-/// and once the debug adapter is ready. Here readiness means we have a [`Debugger`] from the
-/// worker's `debug` message.
+/// and once the debug adapter is ready (C++ debugger or Python debug state from the worker).
 fn try_emit_initialized(state: &Rc<RefCell<DapState>>) {
     let should = {
         let s = state.borrow();
-        s.client_initialized && s.debugger.is_some() && !s.initialized_emitted
+        s.client_initialized
+            && (s.debugger.is_some() || s.python_state.is_some())
+            && !s.initialized_emitted
     };
     if should {
         state.borrow_mut().initialized_emitted = true;
@@ -390,6 +523,7 @@ impl DapAdapter {
             state: Rc::new(RefCell::new(DapState {
                 seq_counter: 0,
                 debugger: None,
+                python_state: None,
                 client_initialized: false,
                 initialized_emitted: false,
                 callback: None,
@@ -418,6 +552,7 @@ impl DapAdapter {
         {
             let mut s = self.state.borrow_mut();
             s.debugger = None;
+            s.python_state = None;
             s.initialized_emitted = false;
         }
 
@@ -439,23 +574,56 @@ impl DapAdapter {
                     state.borrow_mut().debugger = Some(Debugger::new(info));
                     try_emit_initialized(&state);
                 }
+                "python_debug" => {
+                    let sab = js_sys::Reflect::get(&data, &"state".into())
+                        .expect("python_debug message has state field");
+                    let sab = sab
+                        .dyn_into::<js_sys::SharedArrayBuffer>()
+                        .expect("state is a SharedArrayBuffer");
+                    state.borrow_mut().python_state = Some(PythonDebugState::from_sab(sab));
+                    try_emit_initialized(&state);
+                }
                 "paused" => {
-                    let reason = js_sys::Reflect::get(&data, &"reason".into())
-                        .expect("debug message has reason field");
-                    let reason: PauseReason = serde_wasm_bindgen::from_value(reason)
-                        .expect("PauseReason deserialization");
-                    emit_event(
-                        &state,
-                        "stopped",
-                        Some(json!({
-                            "reason": match reason {
-                                PauseReason::Breakpoint => "breakpoint",
-                                PauseReason::Step => "step"
-                            },
-                            "threadId": 1,
-                            "allThreadsStopped": true,
-                        })),
-                    );
+                    let frame_json = js_sys::Reflect::get(&data, &"frame".into())
+                        .ok()
+                        .and_then(|v| v.as_string());
+
+                    if let Some(json_str) = frame_json {
+                        let frames: Vec<PythonFrame> =
+                            serde_json::from_str(&json_str).expect("parse Python frame JSON");
+                        {
+                            let mut s = state.borrow_mut();
+                            if let Some(py) = &mut s.python_state {
+                                py.frames = Some(frames);
+                            }
+                        }
+                        emit_event(
+                            &state,
+                            "stopped",
+                            Some(json!({
+                                "reason": "step",
+                                "threadId": 1,
+                                "allThreadsStopped": true,
+                            })),
+                        );
+                    } else {
+                        let reason = js_sys::Reflect::get(&data, &"reason".into())
+                            .expect("paused message has reason field");
+                        let reason: PauseReason = serde_wasm_bindgen::from_value(reason)
+                            .expect("PauseReason deserialization");
+                        emit_event(
+                            &state,
+                            "stopped",
+                            Some(json!({
+                                "reason": match reason {
+                                    PauseReason::Breakpoint => "breakpoint",
+                                    PauseReason::Step => "step"
+                                },
+                                "threadId": 1,
+                                "allThreadsStopped": true,
+                            })),
+                        );
+                    }
                 }
                 "stop" => {
                     emit_event(&state, "terminated", Some(json!({ "restart": false })));

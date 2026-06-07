@@ -1,0 +1,109 @@
+{
+  "steps": [
+    {
+      "type": "request",
+      "command": "configurationDone",
+      "arguments": {}
+    },
+    {
+      "type": "event",
+      "event": "stopped",
+      "body": {
+        "reason": "step",
+        "threadId": "${{thread}}"
+      },
+      "$timeout": 30000
+    },
+    {
+      "type": "request",
+      "command": "stackTrace",
+      "arguments": { "threadId": "{{thread}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "stackFrames": {
+          "$array.prefix": [
+            {
+              "id": "${{frame}}",
+              "name": "<module>",
+              "line": 1,
+              "source": { "path": "/main.py" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "next",
+      "arguments": { "threadId": "{{thread}}" }
+    },
+    {
+      "type": "event",
+      "event": "stopped",
+      "body": {
+        "reason": "step",
+        "threadId": "{{thread}}"
+      }
+    },
+    {
+      "type": "request",
+      "command": "stackTrace",
+      "arguments": { "threadId": "{{thread}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "stackFrames": {
+          "$array.prefix": [
+            {
+              "line": 2,
+              "source": { "path": "/main.py" }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "scopes",
+      "arguments": { "frameId": "{{frame}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "scopes": {
+          "$array.contains": [
+            {
+              "name": "Locals",
+              "variablesReference": "${{locals}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{locals}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            { "name": "x", "value": "1", "type": "" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "continue",
+      "arguments": { "threadId": "{{thread}}" }
+    }
+  ]
+}

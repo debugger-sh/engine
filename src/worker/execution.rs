@@ -39,6 +39,7 @@ pub struct Step<'a> {
     union_fs: Option<Box<dyn FileSystem>>,
     debug: bool,
     envs: Vec<(String, String)>,
+    device_files: Vec<(PathBuf, Box<dyn wasmer_wasix::virtual_fs::VirtualFile + Send + Sync>)>,
 }
 
 impl Execution {
@@ -58,6 +59,7 @@ impl Execution {
             union_fs: None,
             debug: false,
             envs: Vec::new(),
+            device_files: Vec::new(),
         }
     }
 
@@ -137,6 +139,12 @@ impl<'a> Step<'a> {
         self
     }
 
+    pub fn device_file(mut self, path: &str, file: Box<dyn wasmer_wasix::virtual_fs::VirtualFile + Send + Sync>) -> Self {
+        self.device_files
+            .push((PathBuf::from(path), file));
+        self
+    }
+
     /// Runs this step to completion
     pub async fn run(mut self) -> Result<ExitCode, RuntimeError> {
         /* Download the binary from the URL / filesystem */
@@ -201,6 +209,14 @@ impl<'a> Step<'a> {
         if let Some(union_fs) = self.union_fs {
             let union_fs: Arc<dyn FileSystem + Send + Sync> = Arc::new(union_fs);
             self.exec.fs.union(&union_fs);
+        }
+
+        for (path, file) in self.device_files {
+            self.exec
+                .fs
+                .new_open_options_ext()
+                .insert_device_file(path, file)
+                .ensure("Registered device file")?;
         }
 
         /* Configure Wasmer WASI environment */

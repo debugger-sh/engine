@@ -9,9 +9,11 @@ use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};
 mod debuggee;
 mod execution;
 mod io;
+mod python_debuggee;
 mod runtime;
 
 use execution::Execution;
+use python_debuggee::PythonDebuggee;
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Helpers                                                                  │
@@ -100,6 +102,20 @@ async fn start(msg: WorkerStart) {
     }
 }
 
+async fn write_file(fs: &mem_fs::FileSystem, path: &str, contents: &str) {
+    let mut file = fs
+        .new_open_options()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .expect("opened file for write");
+    file.write_all(contents.as_bytes())
+        .await
+        .expect("wrote file");
+    file.flush().await.expect("flushed file");
+}
+
 async fn start_python(msg: WorkerStart) {
     let fs = create_user_fs(FsNode::Dir(msg.fs))
         .await
@@ -107,16 +123,32 @@ async fn start_python(msg: WorkerStart) {
 
     let exec = Execution::new(msg.stdin_buffer);
 
-    let exit = exec
+    let debuggee = msg.is_debug.then(PythonDebuggee::new);
+    if let Some(debuggee) = &debuggee {
+        write_file(&fs, "/_bridge.py", include_str!("bridge.py")).await;
+        debuggee.send_and_wait();
+    }
+
+    let mut step = exec
         .step("python")
         .binary(PYTHON_WASM_URL)
         .sysroot(PYTHON_STDLIB_URL)
         .fs(Box::new(fs))
-        .args(["/main.py"])
+        .args(if msg.is_debug {
+            &["/_bridge.py"][..]
+        } else {
+            &["/main.py"][..]
+        })
         .envs([
             ("PYTHONUNBUFFERED", "1"),
             ("PYTHONDONTWRITEBYTECODE", "1"),
-        ])
+        ]);
+
+    if let Some(debuggee) = debuggee {
+        step = step.device_file("/__debug__", Box::new(debuggee.debug_file()));
+    }
+
+    let exit = step
         .run()
         .await
         .expect("Python execution succeeded");

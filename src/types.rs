@@ -103,6 +103,12 @@ pub enum WorkerOut<'a> {
     #[serde(rename = "debug")]
     Debug { info: DebugInfo },
 
+    #[serde(rename = "python_debug")]
+    PythonDebug {
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        state: js_sys::SharedArrayBuffer,
+    },
+
     /// Emit a build/engine artifact for the main thread to consume.
     #[serde(rename = "artifact")]
     Artifact {
@@ -114,7 +120,11 @@ pub enum WorkerOut<'a> {
 
     /// Indicate that execution has paused
     #[serde(rename = "paused")]
-    Paused { reason: PauseReason },
+    Paused {
+        reason: PauseReason,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        frame: Option<String>,
+    },
     #[serde(rename = "stop")]
     Stop { exit_code: i32 },
 }

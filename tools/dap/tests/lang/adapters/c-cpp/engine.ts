@@ -16,7 +16,7 @@ export async function createEngineBackend(opts: BackendOptions): Promise<Backend
   const { Engine } = await import('debugger-sh');
   const lang = langForTest(opts.fsNode);
   const engine = await Engine.create(lang);
-  if (lang === 'python') engine.debugger.enabled = false;
+  engine.debugger.enabled = true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   engine.fs = opts.fsNode as unknown as any;
 
