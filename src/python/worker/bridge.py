@@ -9,6 +9,7 @@ class DapBridge(bdb.Bdb):
     def __init__(self):
         super().__init__()
         self._dbg = open('/__debug__', 'r+b', buffering=0)
+        self._stepping = False
 
     def _read_response(self):
         data = b''
@@ -17,7 +18,36 @@ class DapBridge(bdb.Bdb):
             if not chunk:
                 break
             data += chunk
+        if not data:
+            return None
         return json.loads(data.decode())
+
+    def _apply_config(self, resp):
+        self._apply_breakpoints(resp.get("breakpoints", {}))
+        cmd = resp["cmd"]
+        if cmd == CONTINUE:
+            self._stepping = False
+        elif cmd in (STEP_OVER, STEP_INTO, STEP_OUT):
+            self._stepping = True
+
+    def _dispatch(self, resp, frame):
+        self._apply_config(resp)
+        cmd = resp["cmd"]
+
+        if cmd == CONTINUE:
+            self.set_continue()
+        elif cmd == STEP_OVER:
+            self.set_next(frame)
+        elif cmd == STEP_INTO:
+            self.set_step()
+        elif cmd == STEP_OUT:
+            self.set_return(frame)
+
+    def consume_initial_config(self):
+        resp = self._read_response()
+        if resp is None:
+            return
+        self._apply_config(resp)
 
     def _apply_breakpoints(self, breakpoints):
         self.clear_all_breaks()
@@ -26,6 +56,14 @@ class DapBridge(bdb.Bdb):
                 self.set_break(path, line)
 
     def user_line(self, frame):
+        if not self._stepping and not self.break_here(frame):
+            return
+        self._pause(frame)
+
+    def user_exception(self, frame, exc_info):
+        self._pause(frame)
+
+    def _pause(self, frame):
         stack = []
         f = frame
         while f is not None:
@@ -43,18 +81,10 @@ class DapBridge(bdb.Bdb):
         }).encode()
         self._dbg.write(data)
         resp = self._read_response()
-        self._apply_breakpoints(resp.get("breakpoints", {}))
-        cmd = resp["cmd"]
-
-        if cmd == CONTINUE:   self.set_continue()
-        elif cmd == STEP_OVER:  self.set_next(frame)
-        elif cmd == STEP_INTO:  self.set_step()
-        elif cmd == STEP_OUT:   self.set_return(frame)
-
-    def user_exception(self, frame, exc_info):
-        self.user_line(frame)
+        self._dispatch(resp, frame)
 
 debugger = DapBridge()
+debugger.consume_initial_config()
 _main = open('/main.py').read()
 debugger.run(
     compile(_main, '/main.py', 'exec'),

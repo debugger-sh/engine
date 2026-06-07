@@ -2,6 +2,22 @@
   "steps": [
     {
       "type": "request",
+      "command": "setBreakpoints",
+      "arguments": {
+        "source": { "path": "/main.py" },
+        "breakpoints": [{ "line": 2 }]
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "breakpoints": {
+          "$array.contains": [{ "line": 2, "verified": true }]
+        }
+      }
+    },
+    {
+      "type": "request",
       "command": "configurationDone",
       "arguments": {}
     },
@@ -9,7 +25,7 @@
       "type": "event",
       "event": "stopped",
       "body": {
-        "reason": "step",
+        "reason": "breakpoint",
         "threadId": "${{thread}}"
       },
       "$timeout": 30000
@@ -27,7 +43,7 @@
             {
               "id": "${{frame}}",
               "name": "<module>",
-              "line": 1,
+              "line": 2,
               "source": { "path": "/main.py" }
             }
           ]
@@ -58,7 +74,7 @@
         "stackFrames": {
           "$array.prefix": [
             {
-              "line": 2,
+              "line": 3,
               "source": { "path": "/main.py" }
             }
           ]
@@ -95,7 +111,8 @@
       "body": {
         "variables": {
           "$array.contains": [
-            { "name": "x", "value": "1", "type": "" }
+            { "name": "x", "value": "1", "type": "" },
+            { "name": "y", "value": "2", "type": "" }
           ]
         }
       }

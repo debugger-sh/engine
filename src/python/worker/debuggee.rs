@@ -73,12 +73,18 @@ unsafe impl Sync for DebugFile {}
 
 impl DebugFile {
     pub fn new(control: js_sys::Int32Array, response: js_sys::Uint8Array) -> Self {
-        Self {
+        let mut file = Self {
             control,
             response,
             pending_response: None,
             read_offset: 0,
+        };
+        let len = js_sys::Atomics::load(&file.control, 2).unwrap_or(0) as u32;
+        if len > 0 {
+            let json = file.response.slice(0, len);
+            file.pending_response = Some(json.to_vec());
         }
+        file
     }
 }
 
