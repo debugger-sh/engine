@@ -1,7 +1,7 @@
 use console_error_panic_hook;
 use std::path::PathBuf;
 use wasm_bindgen::prelude::*;
-use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, create_dir_all, mem_fs};
+use wasmer_wasix::virtual_fs::{FileSystem, create_dir_all, mem_fs};
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
 use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};
@@ -9,17 +9,16 @@ use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};
 mod debuggee;
 mod execution;
 mod io;
-mod python_debuggee;
+mod python;
 mod runtime;
 
 use execution::Execution;
-use python_debuggee::PythonDebuggee;
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Helpers                                                                  │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-async fn create_user_fs(node: FsNode) -> Result<mem_fs::FileSystem, std::io::Error> {
+pub(super) async fn create_user_fs(node: FsNode) -> Result<mem_fs::FileSystem, std::io::Error> {
     let fs = mem_fs::FileSystem::default();
     create_user_fs_rec(&fs, &PathBuf::from("/"), &node).await?;
     Ok(fs)
@@ -89,71 +88,14 @@ fn collect_dir_sources(
 // │ Worker                                                                   │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-const PYTHON_WASM_URL: &str = "https://runno.dev/langs/python-3.11.3.wasm";
-const PYTHON_STDLIB_URL: &str = "https://runno.dev/langs/python-3.11.3.tar.gz";
-
 const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm";
 const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz";
 
 async fn start(msg: WorkerStart) {
     match msg.lang {
         Lang::C => start_cpp(msg).await,
-        Lang::Python => start_python(msg).await,
+        Lang::Python => python::start(msg).await,
     }
-}
-
-async fn write_file(fs: &mem_fs::FileSystem, path: &str, contents: &str) {
-    let mut file = fs
-        .new_open_options()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)
-        .expect("opened file for write");
-    file.write_all(contents.as_bytes())
-        .await
-        .expect("wrote file");
-    file.flush().await.expect("flushed file");
-}
-
-async fn start_python(msg: WorkerStart) {
-    let fs = create_user_fs(FsNode::Dir(msg.fs))
-        .await
-        .expect("created user files filesystem");
-
-    let exec = Execution::new(msg.stdin_buffer);
-
-    let debuggee = msg.is_debug.then(PythonDebuggee::new);
-    if let Some(debuggee) = &debuggee {
-        write_file(&fs, "/_bridge.py", include_str!("bridge.py")).await;
-        debuggee.send_and_wait();
-    }
-
-    let mut step = exec
-        .step("python")
-        .binary(PYTHON_WASM_URL)
-        .sysroot(PYTHON_STDLIB_URL)
-        .fs(Box::new(fs))
-        .args(if msg.is_debug {
-            &["/_bridge.py"][..]
-        } else {
-            &["/main.py"][..]
-        })
-        .envs([
-            ("PYTHONUNBUFFERED", "1"),
-            ("PYTHONDONTWRITEBYTECODE", "1"),
-        ]);
-
-    if let Some(debuggee) = debuggee {
-        step = step.device_file("/__debug__", Box::new(debuggee.debug_file()));
-    }
-
-    let exit = step
-        .run()
-        .await
-        .expect("Python execution succeeded");
-
-    WorkerOut::Stop { exit_code: exit.raw() }.send();
 }
 
 async fn start_cpp(msg: WorkerStart) {
