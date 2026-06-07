@@ -6,7 +6,7 @@ use crate::{
         dwarf::{Die, R, Visit},
         formatters::ChildCounts,
     },
-    types::GlobalAddress,
+    types::{CodeOffset, MemoryOffset},
 };
 
 use anyhow::Result;
@@ -18,7 +18,7 @@ use gimli::read::Expression;
 ///
 /// `die` should be a reference to a subprogram,
 /// and `pc` should be an offset within the wasm code segment.
-pub fn get_variables<'a>(die: &Die<'a>, pc: GlobalAddress) -> Vec<Die<'a>> {
+pub fn get_variables<'a>(die: &Die<'a>, pc: CodeOffset) -> Vec<Die<'a>> {
     assert!(
         die.tag() == gimli::DW_TAG_subprogram,
         "get_variables requires subprogram die"
@@ -67,7 +67,7 @@ pub fn get_variables<'a>(die: &Die<'a>, pc: GlobalAddress) -> Vec<Die<'a>> {
 }
 
 /// Gets the location expression for a variable at the given PC
-pub fn get_location(die: &Die<'_>, pc: GlobalAddress) -> Option<Expression<R>> {
+pub fn get_location(die: &Die<'_>, pc: CodeOffset) -> Option<Expression<R>> {
     die.expression(gimli::DW_AT_location, pc)
 }
 
@@ -132,10 +132,10 @@ impl Variable {
 
     /// Returns the address of this variable.
     /// If this variable has no known address, returns [None].
-    pub fn address(&self) -> Option<GlobalAddress> {
+    pub fn address(&self) -> Option<MemoryOffset> {
         let piece = self.pieces.first()?;
         match &piece.location {
-            gimli::Location::Address { address } => Some(GlobalAddress(*address)),
+            gimli::Location::Address { address } => Some((*address).into()),
             _ => None,
         }
     }
@@ -154,7 +154,7 @@ impl Variable {
         let piece = self.pieces.first()?;
         let mut bytes = match &piece.location {
             gimli::Location::Address { address } => {
-                self.debugger()?.memory().read(GlobalAddress(*address), len)
+                self.debugger()?.memory().read((*address).into(), len)
             }
             gimli::Location::Value { value } => value_to_le_bytes(*value, len),
             gimli::Location::Bytes { value } => value.to_slice().ok()?.to_vec(),
@@ -224,9 +224,9 @@ impl Variable {
     /// int* x = (int*) 0xBA5EBA11;
     /// ```
     ///
-    /// [Variable::pointer_value] would return `Some(GlobalAddress(0xBA5EBA11))` for
+    /// [Variable::pointer_value] would return `Some(MemoryOffset::from(0xBA5EBA11))` for
     /// the [Variable] corresponding to `x`.
-    pub fn pointer_value(&self) -> Option<GlobalAddress> {
+    pub fn pointer_value(&self) -> Option<MemoryOffset> {
         if let Some(bytes) = self.read(4) {
             Some(u32::from_le_bytes(bytes.try_into().ok()?).into())
         } else {
@@ -385,7 +385,7 @@ fn value_to_le_bytes(value: gimli::Value, len: usize) -> Vec<u8> {
     out
 }
 
-impl GlobalAddress {
+impl MemoryOffset {
     /// Returns the pieces for a variable located at this address.
     pub fn pieces(&self) -> Vec<gimli::Piece<R>> {
         vec![gimli::Piece {

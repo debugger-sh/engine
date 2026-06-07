@@ -719,6 +719,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "console_error_panic_hook",
+ "derive_more 2.1.1",
  "flate2",
  "futures",
  "gimli 0.33.1",

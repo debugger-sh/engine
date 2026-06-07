@@ -50,7 +50,7 @@ impl StdVectorFormatter {
             });
         }
 
-        let bytes = end_addr.0.saturating_sub(begin_addr.0);
+        let bytes = u64::from(end_addr).saturating_sub(u64::from(begin_addr));
         Ok(VectorData {
             begin: begin.clone(),
             count: bytes as usize / elem_size,

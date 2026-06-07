@@ -7,54 +7,89 @@ use wasm_bindgen::JsValue;
 use wasmer::{MemoryType, Pages};
 use web_sys::DedicatedWorkerGlobalScope;
 
+use derive_more::Display;
+
 use crate::debug::dwarf::{DieReference, Dwarf, Location};
+
+macro_rules! offset_type {
+    ($(#[$meta:meta])* $name:ident) => {
+        $(#[$meta])*
+        #[derive(
+            Default,
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            Display,
+            Tsify,
+            Serialize,
+            Deserialize,
+        )]
+        #[serde(transparent)]
+        #[display("0x{_0:x}")]
+        pub struct $name(u64);
+
+        impl From<u32> for $name {
+            fn from(v: u32) -> Self {
+                Self(v as u64)
+            }
+        }
+
+        impl From<u64> for $name {
+            fn from(v: u64) -> Self {
+                Self(v)
+            }
+        }
+
+        impl From<usize> for $name {
+            fn from(v: usize) -> Self {
+                Self(v as u64)
+            }
+        }
+
+        impl From<$name> for u32 {
+            fn from(v: $name) -> Self {
+                v.0 as u32
+            }
+        }
+
+        impl From<$name> for u64 {
+            fn from(v: $name) -> Self {
+                v.0
+            }
+        }
+
+        impl From<$name> for usize {
+            fn from(v: $name) -> Self {
+                v.0 as usize
+            }
+        }
+    };
+}
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Types                                                                    │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-/// Byte offset in the WASM code section
-#[derive(
-    Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Tsify, Serialize, Deserialize,
-)]
-#[serde(transparent)]
-pub struct GlobalAddress(pub u64);
+offset_type!(
+    /// Represents a byte offset into program memory.
+    MemoryOffset
+);
 
-impl GlobalAddress {
+impl MemoryOffset {
     pub fn is_null(&self) -> bool {
-        self.0 == 0
+        *self == Self::default()
     }
 }
 
-impl From<u32> for GlobalAddress {
-    fn from(v: u32) -> Self {
-        Self(v as u64)
-    }
-}
-
-impl From<u64> for GlobalAddress {
-    fn from(v: u64) -> Self {
-        Self(v)
-    }
-}
-
-impl From<GlobalAddress> for u64 {
-    fn from(a: GlobalAddress) -> Self {
-        a.0
-    }
-}
-
-impl From<usize> for GlobalAddress {
-    fn from(v: usize) -> Self {
-        Self(v as u64)
-    }
-}
-
-impl std::fmt::Display for GlobalAddress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0x{:x}", self.0)
-    }
-}
+offset_type!(
+    /// Represents a byte offset into the code section.
+    CodeOffset
+);
 
 #[derive(Debug, Tsify, Deserialize)]
 #[serde(untagged)]
@@ -240,9 +275,9 @@ pub enum WasmLocation {
 #[derive(Debug, Clone, Tsify, Serialize, Deserialize)]
 pub struct DebugFunction {
     /// The first address in this function
-    pub low_pc: GlobalAddress,
+    pub low_pc: CodeOffset,
     /// The first address past the end of this function
-    pub high_pc: GlobalAddress,
+    pub high_pc: CodeOffset,
     /// Reference to dwarf die for this function
     pub die_ref: DieReference,
     /// The total size in bytes of the stack frame, including it's 32-bit tag
@@ -271,8 +306,8 @@ impl MemoryDescriptor {
         buffer.byte_length() as usize
     }
 
-    pub fn read(&self, addr: GlobalAddress, len: usize) -> Vec<u8> {
-        let offset = addr.0 as usize;
+    pub fn read(&self, addr: MemoryOffset, len: usize) -> Vec<u8> {
+        let offset: usize = addr.into();
         let memory_buffer = self.memory.buffer();
         let buffer = memory_buffer.unchecked_ref::<js_sys::ArrayBuffer>();
         let mut out = vec![0u8; len];
@@ -290,12 +325,12 @@ impl MemoryDescriptor {
         out
     }
 
-    pub fn read_u64(&self, addr: GlobalAddress) -> u64 {
+    pub fn read_u64(&self, addr: MemoryOffset) -> u64 {
         let bytes = self.read(addr, 8);
         u64::from_le_bytes(bytes.try_into().unwrap()).into()
     }
 
-    pub fn read_u32(&self, addr: GlobalAddress) -> u32 {
+    pub fn read_u32(&self, addr: MemoryOffset) -> u32 {
         let bytes = self.read(addr, 4);
         u32::from_le_bytes(bytes.try_into().unwrap()).into()
     }
@@ -316,7 +351,7 @@ impl DebugInfo {
     }
 
     /// Finds the index of the function containing this address, if any
-    pub fn fn_index_at(&self, pc: GlobalAddress) -> Option<usize> {
+    pub fn fn_index_at(&self, pc: CodeOffset) -> Option<usize> {
         self.functions
             .binary_search_by(|f| {
                 if pc < f.low_pc {
@@ -331,13 +366,13 @@ impl DebugInfo {
     }
 
     /// Finds the function containing this address, if any
-    pub fn fn_at(&self, pc: GlobalAddress) -> Option<&DebugFunction> {
+    pub fn fn_at(&self, pc: CodeOffset) -> Option<&DebugFunction> {
         self.fn_index_at(pc).map(|idx| &self.functions[idx])
     }
 }
 
 impl DebugFunction {
-    pub fn contains(&self, pc: GlobalAddress) -> bool {
+    pub fn contains(&self, pc: CodeOffset) -> bool {
         pc >= self.low_pc && pc < self.high_pc
     }
 

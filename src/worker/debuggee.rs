@@ -175,7 +175,7 @@ impl Debuggee {
         // On a breakpoint hit we must write the current PC into the most recent frame.
         // This avoids having to add instrumentation code to do this on every line,
         // and instead only do it when a breakpoint is actually hit
-        self.stack.set_uint32_endian(sp as usize, pc.0 as u32, true);
+        self.stack.set_uint32_endian(sp as usize, pc.into(), true);
 
         self.last_sp = sp;
         js_sys::Atomics::store(&self.state, 0, sp).unwrap();

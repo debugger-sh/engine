@@ -5,7 +5,7 @@ use crate::debug::dwarf::{Die, Location, R};
 use crate::debug::formatters::{self, VariableFormatter};
 use crate::debug::{Type, TypeGraph, Variable, get_location, get_variables as debug_get_variables};
 use crate::types::{
-    BreakpointMode, DebugFunction, DebugInfo, GlobalAddress, MemoryDescriptor, WasmLocation,
+    BreakpointMode, CodeOffset, DebugFunction, DebugInfo, MemoryDescriptor, WasmLocation,
 };
 use crate::util::{Ref, WeakRef};
 use anyhow::{Context, Result};
@@ -132,7 +132,7 @@ impl Debugger {
         let mut pos = sp;
 
         while pos < stack_top {
-            let pc = GlobalAddress(view.get_uint32_endian(pos as usize, true) as u64);
+            let pc = view.get_uint32_endian(pos as usize, true).into();
             let func = match self.info.fn_at(pc) {
                 Some(f) => f,
                 None => break,
@@ -213,7 +213,7 @@ impl Debugger {
             if pos >= stack_top {
                 return None;
             }
-            let pc = GlobalAddress(view.get_uint32_endian(pos as usize, true) as u64);
+            let pc = view.get_uint32_endian(pos as usize, true).into();
             let func = self.info.fn_at(pc)?;
             pos += func.size as u32;
         }
@@ -343,7 +343,7 @@ pub struct EvaluationContext {
 }
 
 pub struct DerivedEvaluationContext<'a> {
-    pub pc: GlobalAddress,
+    pub pc: CodeOffset,
     pub func: &'a DebugFunction,
     pub die: Die<'a>,
 }
@@ -376,7 +376,7 @@ impl EvaluationContext {
             .as_deref()
             .context("Cannot evaluate expression without debugger")?;
 
-        let pc: GlobalAddress = debugger.stack().read_u32(self.offset.into()).into();
+        let pc: CodeOffset = debugger.stack().read_u32(self.offset.into()).into();
 
         let func = debugger
             .info()

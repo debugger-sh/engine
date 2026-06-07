@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::{Error, FnInstrumenter, InstrResult};
 use crate::{
     debug::dwarf::{Dwarf, Location},
-    types::{BP_PREFIX_BYTES, DebugFunction, DebugInfo, GlobalAddress, MemoryDescriptor},
+    types::{BP_PREFIX_BYTES, CodeOffset, DebugFunction, DebugInfo, MemoryDescriptor},
     util::supports_wasm_multi_memory,
 };
 use anyhow::Result;
@@ -114,7 +114,7 @@ pub struct Instrumenter {
     code_section_start: usize,
 
     /// Map from code-section byte offset to location
-    pub breakpoints: std::collections::HashMap<GlobalAddress, Location>,
+    pub breakpoints: std::collections::HashMap<CodeOffset, Location>,
 }
 
 impl Instrumenter {
@@ -146,8 +146,8 @@ impl Instrumenter {
 
     /// Converts an offset into the WASM binary into an offset relative to the code section.
     /// DWARF represents PC values relative to start of the code section.
-    pub fn code_ofs(&self, address: usize) -> GlobalAddress {
-        GlobalAddress(address.saturating_sub(self.code_section_start) as u64)
+    pub fn code_ofs(&self, address: usize) -> CodeOffset {
+        CodeOffset::from(address.saturating_sub(self.code_section_start))
     }
 
     pub fn next_location(&mut self, location: Location) -> usize {

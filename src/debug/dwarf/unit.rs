@@ -2,7 +2,7 @@ use std::{collections::HashMap, num::NonZeroU64, path::PathBuf};
 
 use crate::{
     debug::dwarf::{DerefContext, Die, Dwarf},
-    types::GlobalAddress,
+    types::CodeOffset,
     util::weak_error,
 };
 
@@ -32,7 +32,7 @@ pub struct Unit {
 #[derive(PartialEq, Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Location {
     /// Address within code segment
-    pub address: GlobalAddress,
+    pub address: CodeOffset,
     /// Index of the corresponding file.
     /// Use [Dwarf::file_at] to get the associated [PathBuf].
     pub file_index: usize,
