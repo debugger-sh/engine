@@ -4,10 +4,26 @@ use std::{
     task::{Context, Poll},
 };
 
+use serde::Deserialize;
 use wasmer_wasix::virtual_fs::{AsyncRead, AsyncSeek, AsyncWrite, Result, VirtualFile};
 
 use crate::types::{PauseReason, WorkerOut};
 use crate::util::weak_error;
+
+#[derive(Deserialize)]
+struct PythonPauseMeta {
+    reason: String,
+}
+
+fn pause_reason(json: &str) -> PauseReason {
+    match serde_json::from_str::<PythonPauseMeta>(json)
+        .ok()
+        .map(|p| p.reason.as_str())
+    {
+        Some("breakpoint") => PauseReason::Breakpoint,
+        _ => PauseReason::Step,
+    }
+}
 
 /// SAB layout:
 /// - bytes 0..12: 3 x i32 — [0] pause/resume signal, [1] command, [2] response length
@@ -77,7 +93,7 @@ impl AsyncWrite for DebugFile {
     ) -> Poll<io::Result<usize>> {
         let frame = String::from_utf8_lossy(buf).into_owned();
         WorkerOut::Paused {
-            reason: PauseReason::Step,
+            reason: pause_reason(&frame),
             frame: Some(frame),
         }
         .send();

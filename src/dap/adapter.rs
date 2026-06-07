@@ -26,6 +26,19 @@ struct PythonFrame {
     locals: HashMap<String, String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct PythonPause {
+    reason: String,
+    frames: Vec<PythonFrame>,
+}
+
+fn python_dap_reason(reason: &str) -> &'static str {
+    match reason {
+        "breakpoint" => "breakpoint",
+        _ => "step",
+    }
+}
+
 struct PythonDebugState {
     control: js_sys::Int32Array,
     response: js_sys::Uint8Array,
@@ -589,19 +602,19 @@ impl DapAdapter {
                         .and_then(|v| v.as_string());
 
                     if let Some(json_str) = frame_json {
-                        let frames: Vec<PythonFrame> =
-                            serde_json::from_str(&json_str).expect("parse Python frame JSON");
+                        let pause: PythonPause =
+                            serde_json::from_str(&json_str).expect("parse Python pause JSON");
                         {
                             let mut s = state.borrow_mut();
                             if let Some(py) = &mut s.python_state {
-                                py.frames = Some(frames);
+                                py.frames = Some(pause.frames);
                             }
                         }
                         emit_event(
                             &state,
                             "stopped",
                             Some(json!({
-                                "reason": "step",
+                                "reason": python_dap_reason(&pause.reason),
                                 "threadId": 1,
                                 "allThreadsStopped": true,
                             })),

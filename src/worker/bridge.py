@@ -37,7 +37,10 @@ class DapBridge(bdb.Bdb):
             })
             f = f.f_back
 
-        data = json.dumps(stack).encode()
+        data = json.dumps({
+            "reason": "breakpoint" if self.break_here(frame) else "step",
+            "frames": stack,
+        }).encode()
         self._dbg.write(data)
         resp = self._read_response()
         self._apply_breakpoints(resp.get("breakpoints", {}))
