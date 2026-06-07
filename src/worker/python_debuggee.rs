@@ -16,11 +16,8 @@ struct PythonPauseMeta {
 }
 
 fn pause_reason(json: &str) -> PauseReason {
-    match serde_json::from_str::<PythonPauseMeta>(json)
-        .ok()
-        .map(|p| p.reason.as_str())
-    {
-        Some("breakpoint") => PauseReason::Breakpoint,
+    match serde_json::from_str::<PythonPauseMeta>(json).ok() {
+        Some(p) if p.reason == "breakpoint" => PauseReason::Breakpoint,
         _ => PauseReason::Step,
     }
 }
