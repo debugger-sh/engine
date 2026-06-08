@@ -118,10 +118,14 @@ pub enum WorkerOut<'a> {
         name: String,
     },
 
-    /// Indicate that execution has paused
+    /// Indicate that execution has paused.
+    ///
+    /// DWARF backends send `reason`; Python sends a `frame` snapshot it derives the
+    /// reason from. Each backend reads only its own field (see `DapDebugger::handle_paused`).
     #[serde(rename = "paused")]
     Paused {
-        reason: PauseReason,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<PauseReason>,
         #[serde(skip_serializing_if = "Option::is_none")]
         frame: Option<String>,
     },

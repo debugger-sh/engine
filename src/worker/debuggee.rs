@@ -181,7 +181,7 @@ impl Debuggee {
         js_sys::Atomics::store(&self.state, 0, sp).unwrap();
 
         WorkerOut::Paused {
-            reason,
+            reason: Some(reason),
             frame: None,
         }
         .send();
