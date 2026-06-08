@@ -65,6 +65,22 @@ impl VariablesMap {
     }
 }
 
+/// Parse the `start`/`count` window of a DAP `variables` request, clamped to `len`.
+pub(crate) fn requested_range(args: &serde_json::Value, len: usize) -> std::ops::Range<usize> {
+    let start = usize_arg(args, "start").unwrap_or(0).min(len);
+    let end = match usize_arg(args, "count") {
+        Some(count) => start.saturating_add(count).min(len),
+        None => len,
+    };
+    start..end
+}
+
+fn usize_arg(args: &serde_json::Value, name: &str) -> Option<usize> {
+    args.get(name)
+        .and_then(|v| v.as_u64())
+        .and_then(|v| usize::try_from(v).ok())
+}
+
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Base Protocol                                                            │
 // ╰──────────────────────────────────────────────────────────────────────────╯
