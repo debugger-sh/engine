@@ -42,7 +42,7 @@
           "$array.prefix": [
             {
               "id": "${{frame}}",
-              "name": "<module>",
+              "name": "__main__",
               "line": 2,
               "source": { "path": "/main.py" }
             }

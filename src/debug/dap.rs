@@ -199,6 +199,9 @@ fn requested_children(args: &Value, reference: &VariableReference) -> Result<Vec
 
     match reference {
         VariableReference::Simple(_) => Err(anyhow!("Simple variables are not expandable")),
+        VariableReference::Python(_) => {
+            Err(anyhow!("Python variables are expanded by the Python DAP backend"))
+        }
         VariableReference::List(entries) => {
             let range = requested_range(args, entries.len());
             match filter {

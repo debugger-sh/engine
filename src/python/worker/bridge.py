@@ -5,6 +5,65 @@ STEP_OVER  = 1
 STEP_INTO  = 2
 STEP_OUT   = 3
 
+MAX_REPR = 120
+MAX_CHILDREN = 50
+MAX_DEPTH = 3
+
+def truncate_repr(value):
+    s = repr(value)
+    if len(s) <= MAX_REPR:
+        return s
+    return s[:MAX_REPR - 1] + '…'
+
+def format_local(name, value, depth=0):
+    if depth >= MAX_DEPTH:
+        return {"name": name, "value": truncate_repr(value), "children": []}
+
+    if isinstance(value, list):
+        n = len(value)
+        children = [
+            format_local(f'[{i}]', item, depth + 1)
+            for i, item in enumerate(value[:MAX_CHILDREN])
+        ]
+        if n > MAX_CHILDREN:
+            children.append({
+                "name": "…",
+                "value": f"{n - MAX_CHILDREN} more",
+                "children": [],
+            })
+        return {"name": name, "value": f"list[{n}]", "children": children}
+
+    if isinstance(value, tuple):
+        n = len(value)
+        children = [
+            format_local(f'[{i}]', item, depth + 1)
+            for i, item in enumerate(value[:MAX_CHILDREN])
+        ]
+        if n > MAX_CHILDREN:
+            children.append({
+                "name": "…",
+                "value": f"{n - MAX_CHILDREN} more",
+                "children": [],
+            })
+        return {"name": name, "value": f"tuple[{n}]", "children": children}
+
+    if isinstance(value, dict):
+        n = len(value)
+        children = []
+        for i, (key, item) in enumerate(value.items()):
+            if i >= MAX_CHILDREN:
+                children.append({
+                    "name": "…",
+                    "value": f"{n - MAX_CHILDREN} more",
+                    "children": [],
+                })
+                break
+            key_name = key if isinstance(key, str) else repr(key)
+            children.append(format_local(key_name, item, depth + 1))
+        return {"name": name, "value": f"dict[{n}]", "children": children}
+
+    return {"name": name, "value": truncate_repr(value), "children": []}
+
 class DapBridge(bdb.Bdb):
     def __init__(self):
         super().__init__()
@@ -79,7 +138,10 @@ class DapBridge(bdb.Bdb):
                 "line": f.f_lineno,
                 "function": display,
                 "user": f.f_code.co_filename == '/main.py',
-                "locals": {k: repr(v) for k, v in f.f_locals.items()}
+                "locals": [
+                    format_local(name, value)
+                    for name, value in f.f_locals.items()
+                ],
             })
             f = f.f_back
 

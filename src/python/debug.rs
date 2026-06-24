@@ -4,6 +4,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::dap::types::PythonVar;
+
 const PYTHON_DEBUG_HEADER: u32 = 12;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -12,7 +14,7 @@ pub struct StackFrame {
     pub line: i64,
     pub function: String,
     pub user: bool,
-    pub locals: HashMap<String, String>,
+    pub locals: Vec<PythonVar>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -55,7 +57,7 @@ impl Debugger {
             .context("No Python frames")
     }
 
-    pub fn locals(&self, frame_id: usize) -> Result<&HashMap<String, String>> {
+    pub fn locals(&self, frame_id: usize) -> Result<&[PythonVar]> {
         let frame = self
             .backtrace()?
             .get(frame_id)

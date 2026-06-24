@@ -5,6 +5,15 @@ use std::collections::HashMap;
 use crate::debug::Variable;
 use crate::debug::formatters::ChildCounts;
 
+/// One variable in a Python stack frame, optionally with pre-serialized children.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PythonVar {
+    pub name: String,
+    pub value: String,
+    #[serde(default)]
+    pub children: Vec<PythonVar>,
+}
+
 #[derive(Clone)]
 pub enum VariableReference {
     List(Vec<Variable>),
@@ -14,8 +23,10 @@ pub enum VariableReference {
         /// The cached children counts for this variable to avoid recomputing them.
         counts: ChildCounts,
     },
-    /// Plain name/value pairs (e.g. Python locals) without DWARF backing.
+    /// Plain name/value pairs (legacy; unused by current Python bridge).
     Simple(Vec<(String, String)>),
+    /// Tree nodes produced by the Python worker (`list` / `dict` / `tuple` children).
+    Python(Vec<PythonVar>),
 }
 
 /// Tracks variable handles handed out via DAP `variablesReference` IDs.
@@ -39,6 +50,11 @@ impl VariablesMap {
     /// Stores plain string variables and returns a fresh non-zero `variablesReference`.
     pub fn allocate_simple(&mut self, vars: Vec<(String, String)>) -> i64 {
         self.allocate_reference(VariableReference::Simple(vars))
+    }
+
+    /// Stores a Python variable tree level and returns a fresh non-zero `variablesReference`.
+    pub fn allocate_python(&mut self, vars: Vec<PythonVar>) -> i64 {
+        self.allocate_reference(VariableReference::Python(vars))
     }
 
     /// Stores `var` and returns a fresh non-zero `variablesReference`.
