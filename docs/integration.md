@@ -15,7 +15,7 @@ The package ships a WebAssembly binary and TypeScript bindings. Initialize it on
 ```ts
 import { Engine } from 'debugger-sh';
 
-const engine = await Engine.create('c');
+const engine = await Engine.create('c'); // or 'python'
 ```
 
 ---
@@ -239,6 +239,54 @@ After each successful stop, the worker resets mode to **normal** and updates **`
 | `stepIn`                  | Step into                             |
 | `stepOut`                 | Step out                              |
 | `disconnect`              | End session                           |
+
+### Presentation filtering (Python)
+
+When building a student-facing IDE, you usually want to hide debugger/runtime noise from `stackTrace` and `scopes` responses. The engine applies **Python-only** filters; C/C++ stacks come from DWARF and are not filtered the same way.
+
+#### Stack frames — `debugger.filterInternals`
+
+Set **before** `run()`:
+
+```ts
+engine.debugger.filterInternals = true; // recommended for student UIs
+```
+
+| `filterInternals` | `stackTrace` behaviour                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `false` (default) | All frames are returned. Internal frames use `presentationHint: "subtle"`; user code uses `"normal"`. Clients can hide or dim subtle frames themselves. |
+| `true`            | Frames where `user` is `false` are omitted from the response.                                                                                           |
+
+A frame is **`user: true`** when its source path is `/main.py` (the student's virtual file). Everything else — the Bdb bridge (`/_bridge.py`), stdlib, etc. — is internal.
+
+Internal frames always carry `presentationHint: "subtle"` even when `filterInternals` is `false`, so you can implement a “show internals” toggle without re-querying the worker:
+
+```ts
+const frames = res.body?.stackFrames ?? [];
+const studentFrames = frames.filter((f) => f.presentationHint !== 'subtle');
+```
+
+#### Frame names
+
+Python reports module-level code as `<module>`. The bridge renames frames for readability:
+
+| Location                         | Python `co_name`   | Displayed name |
+| -------------------------------- | ------------------ | -------------- |
+| `/main.py` module scope          | `<module>`         | `__main__`     |
+| `/main.py` function              | e.g. `main`, `add` | unchanged      |
+| Other files (e.g. `/_bridge.py`) | `<module>`         | `<module>`     |
+
+So a typical `def main():` + `if __name__ == "__main__": main()` stack shows **`main`** (the function) and **`__main__`** (the module-level caller) — not two frames both named `main`.
+
+#### Locals — dunder names
+
+Python `scopes` / `variables` responses **always** omit names matching `__*__` (e.g. `__builtins__`, `__file__`, `__name__`). There is no client toggle yet; those names are stripped in the adapter before DAP responses are built.
+
+To show them, the engine would need an additional flag (not exposed today). Do not duplicate filtering in the IDE unless you also change the engine to pass the raw names through.
+
+#### C / C++
+
+No `filterInternals` equivalent. `stackTrace` reflects the DWARF backtrace for instrumented user code. Variable formatting follows DWARF type info (see `tools/dap/tests/formatting/`).
 
 ### Program End
 

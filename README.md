@@ -1,6 +1,6 @@
 # debugger-sh
 
-A browser-based execution engine powered by WebAssembly. Compile and run C/C++ programs entirely in the browser with a built-in debugger.
+A browser-based execution engine powered by WebAssembly. Compile and run C/C++ and Python programs entirely in the browser with a built-in debugger.
 
 ## Installation
 
@@ -51,7 +51,7 @@ await engine.run();
 ## Full API
 
 ```ts
-const engine = await Engine.create('c'); // 'c' is currently the only supported lang
+const engine = await Engine.create('c'); // 'c' | 'python'
 
 engine.fs; // DirNode  — virtual filesystem, set before run()
 engine.stdout; // Stdout   — .on('data', (chunk: Uint8Array) => …) / .off(...)
@@ -66,7 +66,12 @@ engine.stop(); // void               — kills the worker; run() resolves with {
 engine.debugger.send(message); // DAP request, returns response synchronously
 engine.debugger.on('event', fn); // async DAP events
 engine.debugger.on('artifact', fn); // download artifacts emitted by the engine
+
+// Python only — hide bridge/bdb frames from stackTrace (set before run())
+engine.debugger.filterInternals = true;
 ```
+
+See [Presentation filtering (Python)](./docs/integration.md#presentation-filtering-python) in the integration guide for stack `presentationHint`, frame naming (`__main__` vs `main`), and dunder local filtering.
 
 ---
 
