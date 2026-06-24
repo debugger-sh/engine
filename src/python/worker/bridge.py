@@ -67,10 +67,18 @@ class DapBridge(bdb.Bdb):
         stack = []
         f = frame
         while f is not None:
+            name = f.f_code.co_name
+            path = f.f_code.co_filename
+            if name == '<module>' and path == '/main.py':
+                # Module scope — not the same as a function named `main`.
+                display = '__main__'
+            else:
+                display = name
             stack.append({
-                "file": f.f_code.co_filename,
+                "file": path,
                 "line": f.f_lineno,
-                "function": f.f_code.co_name,
+                "function": display,
+                "user": f.f_code.co_filename == '/main.py',
                 "locals": {k: repr(v) for k, v in f.f_locals.items()}
             })
             f = f.f_back

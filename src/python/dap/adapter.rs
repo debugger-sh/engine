@@ -9,11 +9,14 @@ use crate::python::debug::Debugger;
 /// DAP backend for Python (Bdb bridge over a shared memory buffer).
 pub struct PythonBackend {
     debugger: Debugger,
+    /// When true, internal frames (bdb, bridge) are omitted from `stackTrace` responses.
+    /// Internal frames are always tagged with `presentationHint: "subtle"` regardless.
+    filter_internals: bool,
 }
 
 impl PythonBackend {
-    pub fn new(debugger: Debugger) -> Self {
-        Self { debugger }
+    pub fn new(debugger: Debugger, filter_internals: bool) -> Self {
+        Self { debugger, filter_internals }
     }
 }
 
@@ -37,30 +40,34 @@ impl DapDebugger for PythonBackend {
         let stack_frames: Vec<_> = frames
             .iter()
             .enumerate()
+            .filter(|(_, f)| !self.filter_internals || f.user)
             .map(|(i, f)| {
                 json!({
                     "id": i as i64,
                     "name": f.function,
                     "line": f.line,
                     "column": 0,
-                    "source": { "path": f.file }
+                    "source": { "path": f.file },
+                    "presentationHint": if f.user { "normal" } else { "subtle" }
                 })
             })
             .collect();
+        let total = stack_frames.len();
         Ok(json!({
             "stackFrames": stack_frames,
-            "totalFrames": frames.len()
+            "totalFrames": total
         }))
     }
 
     fn scopes(&mut self, args: &Value, vars: &mut VariablesMap) -> Result<Value> {
         let frame_id = args.get("frameId").and_then(|v| v.as_i64()).unwrap_or(0) as usize;
         let locals = self.debugger.locals(frame_id)?;
-        let named_variables = locals.len();
         let entries: Vec<(String, String)> = locals
             .iter()
+            .filter(|(k, _)| !(k.starts_with("__") && k.ends_with("__")))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+        let named_variables = entries.len();
         let reference = vars.allocate_simple(entries);
         Ok(json!({
             "scopes": [{

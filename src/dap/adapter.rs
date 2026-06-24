@@ -17,6 +17,7 @@ use crate::types::DebugInfo;
 
 struct AdapterState {
     session: DapSession,
+    filter_internals: bool,
     _closure: Option<Closure<dyn FnMut(web_sys::MessageEvent)>>,
 }
 
@@ -32,6 +33,7 @@ impl DapAdapter {
         Self {
             state: Rc::new(RefCell::new(AdapterState {
                 session: DapSession::new(),
+                filter_internals: false,
                 _closure: None,
             })),
         }
@@ -71,8 +73,9 @@ impl DapAdapter {
                     let sab = sab
                         .dyn_into::<js_sys::SharedArrayBuffer>()
                         .expect("state is a SharedArrayBuffer");
+                    let filter_internals = state.borrow().filter_internals;
                     state.borrow_mut().session.set_debugger(Box::new(
-                        PythonBackend::new(PyDebugger::from_sab(sab)),
+                        PythonBackend::new(PyDebugger::from_sab(sab), filter_internals),
                     ));
                     state.borrow_mut().session.try_emit_initialized();
                 }
@@ -126,6 +129,11 @@ impl DapAdapter {
 
         let ser = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
         response.serialize(&ser).unwrap_or(JsValue::NULL)
+    }
+
+    #[wasm_bindgen(js_name = "setFilterInternals")]
+    pub fn set_filter_internals(&self, value: bool) {
+        self.state.borrow_mut().filter_internals = value;
     }
 
     pub fn on(&self, callback: js_sys::Function) {

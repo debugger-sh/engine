@@ -51,6 +51,17 @@ export class Debugger extends EventEmitter<DebuggerEventMap> {
    */
   public enabled: boolean = true;
 
+  /**
+   * When true, internal frames (bdb, bridge) are omitted from DAP `stackTrace`
+   * responses. Internal frames are always tagged with `presentationHint: "subtle"`
+   * regardless, so raw clients can filter themselves.
+   * Must be set before calling {@link Engine.run}.
+   */
+  public set filterInternals(value: boolean) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.dap as any).setFilterInternals(value);
+  }
+
   constructor() {
     super();
     this[Internals] = {

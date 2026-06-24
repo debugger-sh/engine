@@ -77,25 +77,29 @@ dbg.on('event', (msg) => {
 
 ### Initialization Sequence
 
-Order matches the usual DAP lifecycle:
+Order matches the DAP test harness (`tools/dap/run.ts` + `tools/dap/tests/lang/adapters/c-cpp/engine.ts`):
 
-1. **Client →** `initialize` request
-2. **Adapter →** `initialize` response (body includes **Capabilities**, e.g. `supportsConfigurationDoneRequest`)
-3. **Adapter** builds the internal debugger when the worker sends its `debug` message (instrumented binary ready).
-4. **Adapter →** `initialized` event — emitted only after step **2** has completed **and** step **3** has happened (so the client never configures before the adapter is ready).
-5. **Client →** `setBreakpoints` (zero or more; one request per source file)
-6. **Client →** `setFunctionBreakpoints` if `supportsFunctionBreakpoints` is true (this engine advertises `false`; you can omit it)
-7. **Client →** `setExceptionBreakpoints` when you have filters to set
-8. **Client →** `configurationDone`
-9. **Adapter →** `configurationDone` response — the debuggee then leaves its initial wait and **starts running**
+1. **Client** registers `dbg.on('event', …)` for `initialized`, `stopped`, and `terminated`.
+2. **Client** starts **`engine.run()`** without awaiting it yet — the worker compiles (C) or boots the debug bridge (Python) and then **blocks** until step **9**.
+3. **Client →** `initialize` request (can be sent while `run()` is in flight).
+4. **Adapter →** `initialize` response (body includes **Capabilities**, e.g. `supportsConfigurationDoneRequest`).
+5. **Adapter** builds the internal debugger when the worker sends its `debug` / `python_debug` message (instrumented binary or Python SAB ready).
+6. **Adapter →** `initialized` event — emitted only after steps **4** and **5** (client has initialized **and** a debugger backend is attached).
+7. **Client →** `setBreakpoints` (zero or more; one request per source file).
+8. **Client →** `setExceptionBreakpoints` when you have filters to set (empty `filters: []` is fine).
+9. **Client →** `configurationDone`
+10. **Adapter →** `configurationDone` response — the debuggee then leaves its initial wait and **starts running**.
 
-Call `run()` when the worker should compile and execute; the worker blocks until step **8** completes. A typical pattern is: register `dbg.on('event', …)`, send **`initialize`**, then **`await engine.run()`** (which starts the worker). React to **`initialized`** with steps **5–8**.
+Until step **9** succeeds, `configurationDone` returns an error (`debugger not ready`). The worker is blocked on the main thread, so you must complete the handshake while `run()` is still pending — typically by running `run()` and the handshake **in parallel**.
+
+Do **not** rely on the `initialized` event alone: also retry steps **7–9** until `configurationDone` returns `success: true` (the IDE and test harness both poll). The event is a useful early signal, but the worker may attach slightly before or after the event is delivered to your listener.
 
 ```ts
 let seq = 1;
+let handshakeDone = false;
 
-dbg.on('event', (msg: { type: string; event?: string }) => {
-  if (msg.type !== 'event' || msg.event !== 'initialized') return;
+const completeHandshake = () => {
+  if (handshakeDone) return true;
 
   dbg.send({
     type: 'request',
@@ -114,11 +118,31 @@ dbg.on('event', (msg: { type: string; event?: string }) => {
     arguments: { filters: [] }
   });
 
-  dbg.send({ type: 'request', seq: seq++, command: 'configurationDone', arguments: {} });
+  const res = dbg.send({
+    type: 'request',
+    seq: seq++,
+    command: 'configurationDone',
+    arguments: {}
+  }) as { success?: boolean };
+
+  if (res?.success) handshakeDone = true;
+  return handshakeDone;
+};
+
+dbg.on('event', (msg: { type: string; event?: string }) => {
+  if (msg.type === 'event' && msg.event === 'initialized') completeHandshake();
 });
 
+const runPromise = engine.run();
+
 dbg.send({ type: 'request', seq: seq++, command: 'initialize', arguments: {} });
-await engine.run();
+
+while (!handshakeDone) {
+  if (completeHandshake()) break;
+  await new Promise((r) => setTimeout(r, 50));
+}
+
+await runPromise;
 ```
 
 ### Handling a pause (`stopped`)
