@@ -7,7 +7,7 @@ STEP_OUT   = 3
 
 MAX_REPR = 120      # repr strings longer than this are truncated with an ellipsis
 MAX_CHILDREN = 50   # children shown per container before a "… N more" placeholder
-MAX_DEPTH = 8       # how deep we recurse into nested containers
+MAX_DEPTH = 8       # how deep we recurse into nested containers (TODO: change to lazy)
 MAX_NODES = 5000    # total nodes per pause; guards against huge/deeply nested data
 
 
