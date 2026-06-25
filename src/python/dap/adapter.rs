@@ -4,7 +4,7 @@ use wasm_bindgen::JsValue;
 
 use crate::dap::debugger::DapDebugger;
 use crate::dap::types::{requested_range, VariableReference, VariablesMap};
-use crate::python::dap::vars::{filter_locals, python_var_to_dap};
+use crate::python::dap::vars::python_var_to_dap;
 use crate::python::debug::Debugger;
 
 /// DAP backend for Python (Bdb bridge over a shared memory buffer).
@@ -62,7 +62,7 @@ impl DapDebugger for PythonBackend {
 
     fn scopes(&mut self, args: &Value, vars: &mut VariablesMap) -> Result<Value> {
         let frame_id = args.get("frameId").and_then(|v| v.as_i64()).unwrap_or(0) as usize;
-        let locals = filter_locals(self.debugger.locals(frame_id)?);
+        let locals = self.debugger.locals(frame_id)?.to_vec();
         let named_variables = locals.len();
         let reference = vars.allocate_python(locals);
         Ok(json!({
@@ -86,24 +86,15 @@ impl DapDebugger for PythonBackend {
             .context("Unknown variablesReference")?
             .clone();
 
-        let variables: Vec<Value> = match reference {
-            VariableReference::Python(nodes) => {
-                let range = requested_range(args, nodes.len());
-                nodes[range]
-                    .iter()
-                    .map(|node| python_var_to_dap(node, vars))
-                    .collect()
-            }
-            VariableReference::PythonLazy(worker_ref) => {
-                let nodes = self.debugger.expand(worker_ref)?;
-                let range = requested_range(args, nodes.len());
-                nodes[range]
-                    .iter()
-                    .map(|node| python_var_to_dap(node, vars))
-                    .collect()
-            }
-            _ => anyhow::bail!("Python variablesReference is not expandable"),
+        let VariableReference::Python(nodes) = reference else {
+            anyhow::bail!("Python variablesReference is not expandable");
         };
+
+        let range = requested_range(args, nodes.len());
+        let variables: Vec<Value> = nodes[range]
+            .iter()
+            .map(|node| python_var_to_dap(node, vars))
+            .collect();
         Ok(json!({ "variables": variables }))
     }
 

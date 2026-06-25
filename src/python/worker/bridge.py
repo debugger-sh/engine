@@ -4,112 +4,130 @@ CONTINUE   = 0
 STEP_OVER  = 1
 STEP_INTO  = 2
 STEP_OUT   = 3
-EXPAND     = 4
 
-# Must fit in the SAB response region (4096 - 12 header bytes).
-MAX_RESPONSE_BYTES = 4084
-MAX_REPR = 120
-MAX_CHILDREN = 50
+MAX_REPR = 120      # repr strings longer than this are truncated with an ellipsis
+MAX_CHILDREN = 50   # children shown per container before a "… N more" placeholder
+MAX_DEPTH = 8       # how deep we recurse into nested containers
+MAX_NODES = 5000    # total nodes per pause; guards against huge/deeply nested data
+
 
 def truncate_repr(value):
-    s = repr(value)
+    try:
+        s = repr(value)
+    except Exception:
+        return f"<unreprable {type(value).__name__}>"
     if len(s) <= MAX_REPR:
         return s
     return s[:MAX_REPR - 1] + '…'
+
+
+def is_dunder(name):
+    return name.startswith('__') and name.endswith('__')
+
+
+def object_attrs(value):
+    """Instance attributes of a custom object, or None if it has none worth showing.
+
+    Handles both ``__dict__`` and ``__slots__`` objects, and drops dunder
+    attributes so expanding an instance doesn't surface interpreter internals.
+    """
+    try:
+        attrs = dict(vars(value))
+    except TypeError:
+        attrs = None
+
+    if attrs is None:
+        slots = getattr(type(value), '__slots__', None)
+        if slots is None:
+            return None
+        if isinstance(slots, str):
+            slots = (slots,)
+        attrs = {}
+        for name in slots:
+            try:
+                attrs[name] = getattr(value, name)
+            except AttributeError:
+                pass
+
+    visible = {k: v for k, v in attrs.items() if not is_dunder(k)}
+    return visible or None
+
+
+def container(value):
+    """Describe an expandable value as ``(label, pairs, total, indexed)``.
+
+    ``pairs`` is an iterator of ``(child_name, child_value)``; ``total`` is the
+    real child count (which may exceed ``MAX_CHILDREN``). Returns None for
+    non-containers (scalars), which are rendered with their repr instead.
+    """
+    if isinstance(value, list):
+        return f"list[{len(value)}]", enumerate_pairs(value), len(value), True
+    if isinstance(value, tuple):
+        return f"tuple[{len(value)}]", enumerate_pairs(value), len(value), True
+    if isinstance(value, dict):
+        return f"dict[{len(value)}]", mapping_pairs(value), len(value), False
+
+    attrs = object_attrs(value)
+    if attrs is not None:
+        label = f"{type(value).__name__}[{len(attrs)}]"
+        return label, mapping_pairs(attrs), len(attrs), False
+
+    return None
+
+
+def enumerate_pairs(seq):
+    for i, item in enumerate(seq):
+        yield f'[{i}]', item
+
+
+def mapping_pairs(mapping):
+    for key, item in mapping.items():
+        yield (key if isinstance(key, str) else repr(key)), item
+
 
 class DapBridge(bdb.Bdb):
     def __init__(self):
         super().__init__()
         self._dbg = open('/__debug__', 'r+b', buffering=0)
         self._stepping = False
-        self._refs = {}
-        self._next_ref = 1
+        self._nodes = 0
 
-    def _clear_refs(self):
-        self._refs = {}
-        self._next_ref = 1
+    # ── variable formatting ──────────────────────────────────────────────────
+    #
+    # On every pause we serialize each frame's locals into a fully-expanded tree
+    # (down to MAX_DEPTH / MAX_NODES) and ship it inline with the pause payload.
+    # The UI then walks that tree without ever calling back into the worker, so
+    # expanding a variable never blocks the main thread.
 
-    def _store_ref(self, value):
-        ref = self._next_ref
-        self._next_ref += 1
-        self._refs[ref] = value
-        return ref
+    def _format(self, name, value, depth):
+        self._nodes += 1
+        described = container(value)
+        if described is None:
+            return {"name": name, "value": truncate_repr(value)}
 
-    def format_local(self, name, value):
-        if isinstance(value, list):
-            return {
-                "name": name,
-                "value": f"list[{len(value)}]",
-                "objectRef": self._store_ref(value),
-            }
-        if isinstance(value, tuple):
-            return {
-                "name": name,
-                "value": f"tuple[{len(value)}]",
-                "objectRef": self._store_ref(value),
-            }
-        if isinstance(value, dict):
-            return {
-                "name": name,
-                "value": f"dict[{len(value)}]",
-                "objectRef": self._store_ref(value),
-            }
-        try:
-            n = len(vars(value))
-        except TypeError:
-            n = None
-        if n is not None:
-            cls = type(value).__name__
-            return {
-                "name": name,
-                "value": f"{cls}[{n}]",
-                "objectRef": self._store_ref(value),
-            }
-        return {"name": name, "value": truncate_repr(value)}
+        label, pairs, total, indexed = described
+        node = {"name": name, "value": label}
+        if indexed:
+            node["indexed"] = True
+        # A container past the depth/node budget becomes a leaf: its summary
+        # (e.g. "list[5]") still tells the student what it holds.
+        if depth < MAX_DEPTH and self._nodes < MAX_NODES:
+            node["children"] = self._children(pairs, total, depth)
+        return node
 
-    def _mapping_children(self, mapping):
+    def _children(self, pairs, total, depth):
         children = []
-        n = len(mapping)
-        for i, (key, item) in enumerate(mapping.items()):
+        for i, (name, value) in enumerate(pairs):
             if i >= MAX_CHILDREN:
-                children.append({"name": "…", "value": f"{n - MAX_CHILDREN} more"})
+                children.append({"name": "…", "value": f"{total - MAX_CHILDREN} more"})
                 break
-            key_name = key if isinstance(key, str) else repr(key)
-            children.append(self.format_local(key_name, item))
+            if self._nodes >= MAX_NODES:
+                children.append({"name": "…", "value": "…"})
+                break
+            children.append(self._format(name, value, depth + 1))
         return children
 
-    def _expand_children(self, ref_id):
-        value = self._refs.get(ref_id)
-        if value is None:
-            return {"variables": [], "error": "stale object reference"}
-
-        if isinstance(value, (list, tuple)):
-            children = []
-            n = len(value)
-            for i, item in enumerate(value[:MAX_CHILDREN]):
-                children.append(self.format_local(f'[{i}]', item))
-            if n > MAX_CHILDREN:
-                children.append({"name": "…", "value": f"{n - MAX_CHILDREN} more"})
-        elif isinstance(value, dict):
-            children = self._mapping_children(value)
-        else:
-            try:
-                children = self._mapping_children(vars(value))
-            except TypeError:
-                children = []
-        return {"variables": children}
-
-    def _write_expand_response(self, body):
-        data = json.dumps(body, separators=(',', ':')).encode()
-        if len(data) > MAX_RESPONSE_BYTES:
-            return self._write_expand_response({
-                "variables": [],
-                "error": (
-                    f"expand response too large ({len(data)} bytes, "
-                    f"max {MAX_RESPONSE_BYTES})"
-                ),
-            })
-        self._dbg.write(data)
+    # ── debug channel ────────────────────────────────────────────────────────
 
     def _read_response(self):
         data = b''
@@ -131,11 +149,8 @@ class DapBridge(bdb.Bdb):
             self._stepping = True
 
     def _dispatch(self, resp, frame):
-        if resp.get("cmd") != EXPAND:
-            self._clear_refs()
         self._apply_config(resp)
         cmd = resp["cmd"]
-
         if cmd == CONTINUE:
             self.set_continue()
         elif cmd == STEP_OVER:
@@ -166,13 +181,14 @@ class DapBridge(bdb.Bdb):
         self._pause(frame)
 
     def _pause(self, frame):
-        self._clear_refs()
+        self._nodes = 0
         stack = []
         f = frame
         while f is not None:
             name = f.f_code.co_name
             path = f.f_code.co_filename
             if name == '<module>' and path == '/main.py':
+                # Module scope — not the same as a function named `main`.
                 display = '__main__'
             else:
                 display = name
@@ -182,8 +198,9 @@ class DapBridge(bdb.Bdb):
                 "function": display,
                 "user": f.f_code.co_filename == '/main.py',
                 "locals": [
-                    self.format_local(n, v)
+                    self._format(n, v, 0)
                     for n, v in f.f_locals.items()
+                    if not is_dunder(n)
                 ],
             })
             f = f.f_back
@@ -194,15 +211,11 @@ class DapBridge(bdb.Bdb):
         }, separators=(',', ':')).encode()
         self._dbg.write(pause)
 
-        while True:
-            resp = self._read_response()
-            if resp is None:
-                raise RuntimeError("debugger channel closed while paused")
-            if resp.get("cmd") == EXPAND:
-                self._write_expand_response(self._expand_children(resp.get("ref")))
-                continue
-            self._dispatch(resp, frame)
-            break
+        resp = self._read_response()
+        if resp is None:
+            raise RuntimeError("debugger channel closed while paused")
+        self._dispatch(resp, frame)
+
 
 debugger = DapBridge()
 debugger.consume_initial_config()

@@ -5,17 +5,14 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::dap::types::PythonVar;
-use crate::util::weak_error;
 
 pub const PYTHON_DEBUG_HEADER: u32 = 12;
 pub const PYTHON_RESPONSE_MAX: usize = 4096 - PYTHON_DEBUG_HEADER as usize;
 
 pub const PYTHON_CMD_CONTINUE: i32 = 0;
-pub const PYTHON_CMD_EXPAND: i32 = 4;
 
 pub const SIGNAL_IDLE: i32 = 0;
 pub const SIGNAL_MAIN_CMD: i32 = 1;
-pub const SIGNAL_WORKER_RESP: i32 = 2;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct StackFrame {
@@ -30,13 +27,6 @@ pub struct StackFrame {
 struct PauseInfo {
     reason: String,
     frames: Vec<StackFrame>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ExpandResponse {
-    variables: Vec<PythonVar>,
-    #[serde(default)]
-    error: Option<String>,
 }
 
 /// Main-thread Python debugger that operates on the shared memory buffer
@@ -79,16 +69,6 @@ impl Debugger {
             .get(frame_id)
             .context("Invalid frame id")?;
         Ok(&frame.locals)
-    }
-
-    pub fn expand(&self, object_ref: i64) -> Result<Vec<PythonVar>> {
-        let payload = json!({
-            "cmd": PYTHON_CMD_EXPAND,
-            "ref": object_ref,
-            "breakpoints": self.breakpoints,
-        });
-        self.send_request(&payload)?;
-        self.read_expand_response()
     }
 
     pub fn set_breakpoints(&mut self, source: &str, lines: Vec<i64>) {
@@ -135,32 +115,5 @@ impl Debugger {
         js_sys::Atomics::store(&self.control, 0, SIGNAL_MAIN_CMD).expect("stored main command");
         js_sys::Atomics::notify(&self.control, 0).expect("notified python worker");
         Ok(())
-    }
-
-    fn read_expand_response(&self) -> Result<Vec<PythonVar>> {
-        loop {
-            let signal = js_sys::Atomics::load(&self.control, 0).expect("loaded handshake");
-            if signal == SIGNAL_WORKER_RESP {
-                break;
-            }
-            weak_error!(js_sys::Atomics::wait(&self.control, 0, signal));
-        }
-
-        let len = js_sys::Atomics::load(&self.control, 2).expect("loaded response length") as u32;
-        if len == 0 {
-            js_sys::Atomics::store(&self.control, 0, SIGNAL_IDLE).expect("cleared handshake");
-            bail!("Python expand: empty worker response");
-        }
-
-        let json = self.response.slice(0, len);
-        let bytes = json.to_vec();
-        js_sys::Atomics::store(&self.control, 0, SIGNAL_IDLE).expect("cleared handshake");
-
-        let body: ExpandResponse =
-            serde_json::from_slice(&bytes).context("parse Python expand JSON")?;
-        if let Some(error) = body.error {
-            bail!("Python expand: {error}");
-        }
-        Ok(body.variables)
     }
 }

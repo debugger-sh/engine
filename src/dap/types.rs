@@ -5,14 +5,19 @@ use std::collections::HashMap;
 use crate::debug::Variable;
 use crate::debug::formatters::ChildCounts;
 
-/// One variable in a Python stack frame. Expandable containers carry `objectRef`
-/// (worker-side handle); children are fetched lazily via EXPAND.
+/// One variable in a Python stack frame. The worker sends each frame's locals
+/// fully expanded at pause time, so `children` already holds the entire subtree
+/// (down to the worker's depth/node caps) — no lazy round-trips are needed.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PythonVar {
     pub name: String,
     pub value: String,
-    #[serde(default, rename = "objectRef")]
-    pub object_ref: Option<i64>,
+    #[serde(default)]
+    pub children: Vec<PythonVar>,
+    /// True when children are positional (list/tuple) rather than named
+    /// (dict/object); controls the DAP `indexedVariables`/`namedVariables` hint.
+    #[serde(default)]
+    pub indexed: bool,
 }
 
 #[derive(Clone)]
@@ -24,12 +29,8 @@ pub enum VariableReference {
         /// The cached children counts for this variable to avoid recomputing them.
         counts: ChildCounts,
     },
-    /// Plain name/value pairs (legacy; unused by current Python bridge).
-    Simple(Vec<(String, String)>),
-    /// Top-level locals or one expanded level from the worker.
+    /// A level of the Python locals tree (already expanded by the worker).
     Python(Vec<PythonVar>),
-    /// Worker-side object handle; resolved via EXPAND on `variables` request.
-    PythonLazy(i64),
 }
 
 /// Tracks variable handles handed out via DAP `variablesReference` IDs.
@@ -50,19 +51,9 @@ impl VariablesMap {
         self.allocate_reference(VariableReference::List(vars))
     }
 
-    /// Stores plain string variables and returns a fresh non-zero `variablesReference`.
-    pub fn allocate_simple(&mut self, vars: Vec<(String, String)>) -> i64 {
-        self.allocate_reference(VariableReference::Simple(vars))
-    }
-
     /// Stores a Python variable level and returns a fresh non-zero `variablesReference`.
     pub fn allocate_python(&mut self, vars: Vec<PythonVar>) -> i64 {
         self.allocate_reference(VariableReference::Python(vars))
-    }
-
-    /// Stores a lazy worker object handle for later EXPAND.
-    pub fn allocate_python_lazy(&mut self, worker_ref: i64) -> i64 {
-        self.allocate_reference(VariableReference::PythonLazy(worker_ref))
     }
 
     /// Stores `var` and returns a fresh non-zero `variablesReference`.
