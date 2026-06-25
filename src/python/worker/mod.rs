@@ -7,31 +7,44 @@ use crate::worker::execution::Execution;
 
 use debuggee::PythonDebuggee;
 
-const WASM_URL: &str = "https://runno.dev/langs/python-3.11.3.wasm";
-const STDLIB_URL: &str = "https://runno.dev/langs/python-3.11.3.tar.gz";
+// Single source of truth for these is `prefetch_urls` in lib.rs (warmed by the host).
+pub(crate) const WASM_URL: &str = "https://runno.dev/langs/python-3.11.3.wasm";
+pub(crate) const STDLIB_URL: &str = "https://runno.dev/langs/python-3.11.3.tar.gz";
 
-async fn write_file(fs: &mem_fs::FileSystem, path: &str, contents: &str) {
+async fn write_file(fs: &mem_fs::FileSystem, path: &str, contents: &str) -> std::io::Result<()> {
     let mut file = fs
         .new_open_options()
         .create(true)
         .write(true)
         .truncate(true)
-        .open(path)
-        .expect("opened file for write");
-    file.write_all(contents.as_bytes()).await.expect("wrote file");
-    file.flush().await.expect("flushed file");
+        .open(path)?;
+    file.write_all(contents.as_bytes()).await?;
+    file.flush().await?;
+    Ok(())
 }
 
 pub async fn start(msg: WorkerStart) {
+    // Report setup/runtime failures as a clean error instead of panicking, so the
+    // host shows a message rather than a Rust backtrace. A non-zero exit code is
+    // the program's own result, not an error.
+    match run(msg).await {
+        Ok(exit_code) => WorkerOut::Stop { exit_code }.send(),
+        Err(message) => WorkerOut::Error { message }.send(),
+    }
+}
+
+async fn run(msg: WorkerStart) -> Result<i32, String> {
     let fs = crate::worker::create_user_fs(FsNode::Dir(msg.fs))
         .await
-        .expect("created user files filesystem");
+        .map_err(|e| format!("Failed to prepare the filesystem: {e}"))?;
 
     let exec = Execution::new(msg.stdin_buffer);
 
     let debuggee = msg.is_debug.then(PythonDebuggee::new);
     if let Some(debuggee) = &debuggee {
-        write_file(&fs, "/_bridge.py", include_str!("bridge.py")).await;
+        write_file(&fs, "/_bridge.py", include_str!("bridge.py"))
+            .await
+            .map_err(|e| format!("Failed to write the debug bridge: {e}"))?;
         debuggee.send_and_wait();
     }
 
@@ -47,6 +60,9 @@ pub async fn start(msg: WorkerStart) {
         step = step.device_file("/__debug__", Box::new(debuggee.debug_file()));
     }
 
-    let exit = step.run().await.expect("Python execution succeeded");
-    WorkerOut::Stop { exit_code: exit.raw() }.send();
+    let exit = step
+        .run()
+        .await
+        .map_err(|e| format!("Failed to run Python (could not load the runtime?): {e}"))?;
+    Ok(exit.raw())
 }

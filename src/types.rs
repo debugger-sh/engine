@@ -131,6 +131,11 @@ pub enum WorkerOut<'a> {
     },
     #[serde(rename = "stop")]
     Stop { exit_code: i32 },
+
+    /// A setup/runtime failure in the engine itself (e.g. the language runtime
+    /// failed to load) — distinct from the user's program exiting non-zero.
+    #[serde(rename = "error")]
+    Error { message: String },
 }
 
 impl<'a> WorkerOut<'a> {

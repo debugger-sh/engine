@@ -1,6 +1,6 @@
 import EventEmitter from 'events';
 
-import { StdoutMode, WorkerOut, WorkerStart } from '../../pkg/engine';
+import { prefetch_urls, StdoutMode, WorkerOut, WorkerStart } from '../../pkg/engine';
 import init from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
@@ -8,17 +8,6 @@ import { errorResult, Internals } from './util';
 import RustWorker from './worker?worker&inline';
 
 export type Lang = 'c' | 'python';
-
-const PREFETCH_URLS: Record<Lang, string[]> = {
-  c: [
-    'https://fabioibanez.github.io/website/llvm.core.wasm',
-    'https://fabioibanez.github.io/website/llvm-resources.tar.gz'
-  ],
-  python: [
-    'https://runno.dev/langs/python-3.11.3.wasm',
-    'https://runno.dev/langs/python-3.11.3.tar.gz'
-  ]
-};
 
 /** The engine ran to completion with the provided `exitCode`. */
 export type CompletedResult = { type: 'completed'; exitCode: number };
@@ -60,7 +49,7 @@ export class Engine {
   static async create(lang: Lang): Promise<Engine> {
     await init({ module_or_path: wasmBinary });
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
-      for (const url of PREFETCH_URLS[lang] ?? []) void fetch(url, { cache: 'force-cache' });
+      for (const url of prefetch_urls(lang)) void fetch(url, { cache: 'force-cache' });
     return new Engine(lang);
   }
 
@@ -113,6 +102,11 @@ export class Engine {
         worker.addEventListener('message', (message: MessageEvent<WorkerOut>) => {
           if (message.data.type === 'stop')
             resolve({ type: 'completed', exitCode: message.data.exit_code });
+          else if (message.data.type === 'error')
+            resolve({
+              type: 'error',
+              error: { type: 'EngineError', message: message.data.message }
+            });
         });
 
         const message: WorkerStart = {

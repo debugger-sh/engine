@@ -87,8 +87,9 @@ fn collect_dir_sources(
 // │ Worker                                                                   │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm";
-const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz";
+// Single source of truth for these is `prefetch_urls` in lib.rs (warmed by the host).
+pub(crate) const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm";
+pub(crate) const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz";
 
 async fn start(msg: WorkerStart) {
     match msg.lang {
@@ -197,7 +198,7 @@ async fn start_cpp(msg: WorkerStart) {
 
     let exit = exec
         .step("wasm-ld")
-        .binary("https://fabioibanez.github.io/website/llvm.core.wasm")
+        .binary(CPP_WASM_URL)
         .args(&link_args)
         .run()
         .await
