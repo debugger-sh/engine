@@ -86,15 +86,24 @@ impl DapDebugger for PythonBackend {
             .context("Unknown variablesReference")?
             .clone();
 
-        let VariableReference::Python(nodes) = reference else {
-            anyhow::bail!("Python variablesReference is not expandable");
+        let variables: Vec<Value> = match reference {
+            VariableReference::Python(nodes) => {
+                let range = requested_range(args, nodes.len());
+                nodes[range]
+                    .iter()
+                    .map(|node| python_var_to_dap(node, vars))
+                    .collect()
+            }
+            VariableReference::PythonLazy(worker_ref) => {
+                let nodes = self.debugger.expand(worker_ref)?;
+                let range = requested_range(args, nodes.len());
+                nodes[range]
+                    .iter()
+                    .map(|node| python_var_to_dap(node, vars))
+                    .collect()
+            }
+            _ => anyhow::bail!("Python variablesReference is not expandable"),
         };
-
-        let range = requested_range(args, nodes.len());
-        let variables: Vec<_> = nodes[range]
-            .iter()
-            .map(|node| python_var_to_dap(node, vars))
-            .collect();
         Ok(json!({ "variables": variables }))
     }
 

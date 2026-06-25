@@ -6,14 +6,16 @@ use std::{
 
 use wasmer_wasix::virtual_fs::{AsyncRead, AsyncSeek, AsyncWrite, Result, VirtualFile};
 
+use crate::python::debug::{
+    PYTHON_DEBUG_HEADER, PYTHON_RESPONSE_MAX, SIGNAL_IDLE, SIGNAL_MAIN_CMD, SIGNAL_WORKER_RESP,
+};
 use crate::types::WorkerOut;
 use crate::util::weak_error;
 
 /// SAB layout:
-/// - bytes 0..12: 3 x i32 — [0] pause/resume signal, [1] command, [2] response length
-/// - bytes 12..: UTF-8 JSON resume payload written by the main thread
+/// - bytes 0..12: 3 x i32 — [0] handshake, [1] command, [2] response length
+/// - bytes 12..: UTF-8 JSON payload
 const PYTHON_DEBUG_SAB_SIZE: u32 = 4096;
-const PYTHON_DEBUG_HEADER: u32 = 12;
 
 pub struct PythonDebuggee {
     sab: js_sys::SharedArrayBuffer,
@@ -66,12 +68,60 @@ impl DebugFile {
             pending_response: None,
             read_offset: 0,
         };
-        let len = js_sys::Atomics::load(&file.control, 2).unwrap_or(0) as u32;
-        if len > 0 {
-            let json = file.response.slice(0, len);
-            file.pending_response = Some(json.to_vec());
-        }
+        file.reload_pending_from_sab();
         file
+    }
+
+    fn reload_pending_from_sab(&mut self) {
+        let len = js_sys::Atomics::load(&self.control, 2).unwrap_or(0) as u32;
+        if len == 0 {
+            self.pending_response = None;
+            return;
+        }
+        let json = self.response.slice(0, len);
+        self.pending_response = Some(json.to_vec());
+        self.read_offset = 0;
+    }
+
+    fn wait_for_main_command(&self) {
+        loop {
+            let signal = js_sys::Atomics::load(&self.control, 0).expect("loaded handshake");
+            if signal == SIGNAL_MAIN_CMD {
+                return;
+            }
+            weak_error!(js_sys::Atomics::wait(&self.control, 0, signal));
+        }
+    }
+
+    fn deliver_expand_response(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let payload = if buf.len() > PYTHON_RESPONSE_MAX {
+            format!(
+                r#"{{"variables":[],"error":"expand response too large ({} bytes, max {})"}}"#,
+                buf.len(),
+                PYTHON_RESPONSE_MAX
+            )
+            .into_bytes()
+        } else {
+            buf.to_vec()
+        };
+
+        let len = payload.len() as u32;
+        self.response
+            .set(&js_sys::Uint8Array::from(&payload[..]), 0);
+        js_sys::Atomics::store(&self.control, 2, len as i32).expect("stored response length");
+        js_sys::Atomics::store(&self.control, 0, SIGNAL_WORKER_RESP).expect("stored worker resp");
+        js_sys::Atomics::notify(&self.control, 0).expect("notified main thread");
+        Ok(buf.len())
+    }
+
+    fn is_expand_response(buf: &[u8]) -> bool {
+        let Ok(text) = std::str::from_utf8(buf) else {
+            return false;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+            return false;
+        };
+        value.get("variables").is_some() && value.get("frames").is_none()
     }
 }
 
@@ -81,6 +131,10 @@ impl AsyncWrite for DebugFile {
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        if Self::is_expand_response(buf) {
+            return Poll::Ready(self.deliver_expand_response(buf));
+        }
+
         let frame = String::from_utf8_lossy(buf).into_owned();
         WorkerOut::Paused {
             reason: None,
@@ -88,13 +142,9 @@ impl AsyncWrite for DebugFile {
         }
         .send();
 
-        js_sys::Atomics::store(&self.control, 0, 0).expect("stored pause signal");
-        weak_error!(js_sys::Atomics::wait(&self.control, 0, 0));
-
-        let len = js_sys::Atomics::load(&self.control, 2).expect("loaded response length") as u32;
-        let json = self.response.slice(0, len);
-        self.pending_response = Some(json.to_vec());
-        self.read_offset = 0;
+        js_sys::Atomics::store(&self.control, 0, SIGNAL_IDLE).expect("cleared pause signal");
+        self.wait_for_main_command();
+        self.reload_pending_from_sab();
 
         Poll::Ready(Ok(buf.len()))
     }
@@ -134,6 +184,11 @@ impl AsyncRead for DebugFile {
         _cx: &mut Context<'_>,
         buf: &mut wasmer_wasix::virtual_fs::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        if self.pending_response.is_none() {
+            self.wait_for_main_command();
+            self.reload_pending_from_sab();
+        }
+
         let Some(data) = &self.pending_response else {
             return Poll::Ready(Ok(()));
         };

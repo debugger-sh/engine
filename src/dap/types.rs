@@ -5,13 +5,14 @@ use std::collections::HashMap;
 use crate::debug::Variable;
 use crate::debug::formatters::ChildCounts;
 
-/// One variable in a Python stack frame, optionally with pre-serialized children.
+/// One variable in a Python stack frame. Expandable containers carry `objectRef`
+/// (worker-side handle); children are fetched lazily via EXPAND.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PythonVar {
     pub name: String,
     pub value: String,
-    #[serde(default)]
-    pub children: Vec<PythonVar>,
+    #[serde(default, rename = "objectRef")]
+    pub object_ref: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -25,8 +26,10 @@ pub enum VariableReference {
     },
     /// Plain name/value pairs (legacy; unused by current Python bridge).
     Simple(Vec<(String, String)>),
-    /// Tree nodes produced by the Python worker (`list` / `dict` / `tuple` children).
+    /// Top-level locals or one expanded level from the worker.
     Python(Vec<PythonVar>),
+    /// Worker-side object handle; resolved via EXPAND on `variables` request.
+    PythonLazy(i64),
 }
 
 /// Tracks variable handles handed out via DAP `variablesReference` IDs.
@@ -52,9 +55,14 @@ impl VariablesMap {
         self.allocate_reference(VariableReference::Simple(vars))
     }
 
-    /// Stores a Python variable tree level and returns a fresh non-zero `variablesReference`.
+    /// Stores a Python variable level and returns a fresh non-zero `variablesReference`.
     pub fn allocate_python(&mut self, vars: Vec<PythonVar>) -> i64 {
         self.allocate_reference(VariableReference::Python(vars))
+    }
+
+    /// Stores a lazy worker object handle for later EXPAND.
+    pub fn allocate_python_lazy(&mut self, worker_ref: i64) -> i64 {
+        self.allocate_reference(VariableReference::PythonLazy(worker_ref))
     }
 
     /// Stores `var` and returns a fresh non-zero `variablesReference`.

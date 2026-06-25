@@ -282,17 +282,17 @@ So a typical `def main():` + `if __name__ == "__main__": main()` stack shows **`
 
 Python `scopes` / `variables` responses **always** omit names matching `__*__` (e.g. `__builtins__`, `__file__`, `__name__`). There is no client toggle yet; those names are stripped in the adapter before DAP responses are built.
 
-#### Locals — `list`, `dict`, and `tuple`
+#### Locals — `list`, `dict`, and `tuple` (lazy expand)
 
 Container locals are expandable in the variables tree (like C++ structs):
 
 - **Scalars** — `variablesReference: 0`, value is a truncated `repr` (120 characters max).
-- **`list` / `tuple`** — summary `list[N]` / `tuple[N]` with indexed children `[0]`, `[1]`, …
-- **`dict`** — summary `dict[N]` with named children (string keys as-is, other keys via `repr`).
+- **`list` / `tuple`** — summary `list[N]` / `tuple[N]` with `objectRef`; children fetched on `variables` via worker **EXPAND** (one flat level per request).
+- **`dict`** — summary `dict[N]` with named children loaded lazily the same way.
 
-The worker pre-serializes up to **3 levels** of nesting, **50 children** per container, then the client can request deeper levels via `variables` + `variablesReference` until the pre-serialized tree ends. Custom class instances still show as `<Type object at 0x…>` until a formatter is added.
+EXPAND responses must fit in the debug **SAB** (4084 bytes). The bridge returns an explicit error if a level would exceed that limit rather than truncating silently. Worker-side object refs are cleared when the debuggee resumes.
 
-To show dunder locals, the engine would need an additional flag (not exposed today). Do not duplicate filtering in the IDE unless the engine is changed to pass raw names through.
+Custom class instances still show as `<Type object at 0x…>` until `__dict__` support is added.
 
 #### C / C++
 

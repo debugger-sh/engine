@@ -14,12 +14,24 @@ pub fn filter_locals(locals: &[PythonVar]) -> Vec<PythonVar> {
         .collect()
 }
 
-pub fn python_var_to_dap(node: &PythonVar, vars: &mut VariablesMap) -> Value {
-    let child_count = node.children.len();
-    let sub_ref = if child_count == 0 {
-        0
+fn child_count_hint(value: &str) -> Option<(bool, i64)> {
+    let (indexed, inner) = if let Some(inner) = value.strip_prefix("list[") {
+        (true, inner)
+    } else if let Some(inner) = value.strip_prefix("tuple[") {
+        (true, inner)
+    } else if let Some(inner) = value.strip_prefix("dict[") {
+        (false, inner)
     } else {
-        vars.allocate_python(node.children.clone())
+        return None;
+    };
+    let count = inner.strip_suffix(']')?.parse::<i64>().ok()?;
+    Some((indexed, count))
+}
+
+pub fn python_var_to_dap(node: &PythonVar, vars: &mut VariablesMap) -> Value {
+    let sub_ref = match node.object_ref {
+        Some(worker_ref) => vars.allocate_python_lazy(worker_ref),
+        None => 0,
     };
 
     let mut value = json!({
@@ -29,9 +41,13 @@ pub fn python_var_to_dap(node: &PythonVar, vars: &mut VariablesMap) -> Value {
         "variablesReference": sub_ref,
     });
 
-    if child_count > 0 {
-        if let Some(map) = value.as_object_mut() {
-            map.insert("namedVariables".into(), child_count.into());
+    if let Some(map) = value.as_object_mut() {
+        if let Some((indexed, count)) = child_count_hint(&node.value) {
+            if indexed {
+                map.insert("indexedVariables".into(), count.into());
+            } else {
+                map.insert("namedVariables".into(), count.into());
+            }
         }
     }
 
