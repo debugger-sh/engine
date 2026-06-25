@@ -292,7 +292,7 @@ Container locals are expandable in the variables tree (like C++ structs):
 
 EXPAND responses must fit in the debug **SAB** (4084 bytes). The bridge returns an explicit error if a level would exceed that limit rather than truncating silently. Worker-side object refs are cleared when the debuggee resumes.
 
-Custom class instances still show as `<Type object at 0x…>` until `__dict__` support is added.
+- **Custom instances** — summary `ClassName[N]` with named fields from `__dict__`, expanded lazily like dicts. Objects without `__dict__` (e.g. `__slots__`-only) stay as truncated `repr`.
 
 #### C / C++
 

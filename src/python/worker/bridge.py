@@ -54,28 +54,49 @@ class DapBridge(bdb.Bdb):
                 "value": f"dict[{len(value)}]",
                 "objectRef": self._store_ref(value),
             }
+        try:
+            n = len(vars(value))
+        except TypeError:
+            n = None
+        if n is not None:
+            cls = type(value).__name__
+            return {
+                "name": name,
+                "value": f"{cls}[{n}]",
+                "objectRef": self._store_ref(value),
+            }
         return {"name": name, "value": truncate_repr(value)}
+
+    def _mapping_children(self, mapping):
+        children = []
+        n = len(mapping)
+        for i, (key, item) in enumerate(mapping.items()):
+            if i >= MAX_CHILDREN:
+                children.append({"name": "…", "value": f"{n - MAX_CHILDREN} more"})
+                break
+            key_name = key if isinstance(key, str) else repr(key)
+            children.append(self.format_local(key_name, item))
+        return children
 
     def _expand_children(self, ref_id):
         value = self._refs.get(ref_id)
         if value is None:
             return {"variables": [], "error": "stale object reference"}
 
-        children = []
         if isinstance(value, (list, tuple)):
+            children = []
             n = len(value)
             for i, item in enumerate(value[:MAX_CHILDREN]):
                 children.append(self.format_local(f'[{i}]', item))
             if n > MAX_CHILDREN:
                 children.append({"name": "…", "value": f"{n - MAX_CHILDREN} more"})
         elif isinstance(value, dict):
-            n = len(value)
-            for i, (key, item) in enumerate(value.items()):
-                if i >= MAX_CHILDREN:
-                    children.append({"name": "…", "value": f"{n - MAX_CHILDREN} more"})
-                    break
-                key_name = key if isinstance(key, str) else repr(key)
-                children.append(self.format_local(key_name, item))
+            children = self._mapping_children(value)
+        else:
+            try:
+                children = self._mapping_children(vars(value))
+            except TypeError:
+                children = []
         return {"variables": children}
 
     def _write_expand_response(self, body):

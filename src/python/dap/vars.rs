@@ -21,6 +21,11 @@ fn child_count_hint(value: &str) -> Option<(bool, i64)> {
         (true, inner)
     } else if let Some(inner) = value.strip_prefix("dict[") {
         (false, inner)
+    } else if let Some((prefix, rest)) = value.split_once('[') {
+        if matches!(prefix, "list" | "tuple" | "dict") {
+            return None;
+        }
+        (false, rest)
     } else {
         return None;
     };

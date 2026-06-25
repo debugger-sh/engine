@@ -5,14 +5,14 @@
       "command": "setBreakpoints",
       "arguments": {
         "source": { "path": "/main.py" },
-        "breakpoints": [{ "line": 4 }]
+        "breakpoints": [{ "line": 10 }]
       }
     },
     {
       "type": "response",
       "body": {
         "breakpoints": {
-          "$array.contains": [{ "line": 4, "verified": true }]
+          "$array.contains": [{ "line": 10, "verified": true }]
         }
       }
     },
@@ -75,6 +75,7 @@
           "$array.contains": [
             { "name": "data", "value": "dict[1]", "variablesReference": "${{data}}" },
             { "name": "items", "value": "list[3]", "variablesReference": "${{items}}" },
+            { "name": "carol", "value": "User[2]", "variablesReference": "${{carol}}" },
             { "name": "x", "value": "1", "variablesReference": 0 }
           ]
         }
@@ -148,6 +149,40 @@
             { "name": "name", "value": "'alice'", "variablesReference": 0 }
           ]
         }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{carol}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            { "name": "name", "value": "'carol'", "variablesReference": 0 },
+            { "name": "scores", "value": "list[2]", "variablesReference": "${{scores}}" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{scores}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": [
+          { "name": "[0]", "value": "100", "variablesReference": 0 },
+          { "name": "[1]", "value": "92", "variablesReference": 0 }
+        ]
       }
     },
     {
