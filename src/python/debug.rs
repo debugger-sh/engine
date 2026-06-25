@@ -9,7 +9,11 @@ use crate::dap::types::PythonVar;
 pub const PYTHON_DEBUG_HEADER: u32 = 12;
 pub const PYTHON_RESPONSE_MAX: usize = 4096 - PYTHON_DEBUG_HEADER as usize;
 
+// Resume commands sent to the worker. Must match the constants in bridge.py.
 pub const PYTHON_CMD_CONTINUE: i32 = 0;
+pub const PYTHON_CMD_STEP_OVER: i32 = 1;
+pub const PYTHON_CMD_STEP_INTO: i32 = 2;
+pub const PYTHON_CMD_STEP_OUT: i32 = 3;
 
 pub const SIGNAL_IDLE: i32 = 0;
 pub const SIGNAL_MAIN_CMD: i32 = 1;
@@ -80,15 +84,15 @@ impl Debugger {
     }
 
     pub fn step_over(&self) {
-        let _ = self.send_resume(1);
+        let _ = self.send_resume(PYTHON_CMD_STEP_OVER);
     }
 
     pub fn step_into(&self) {
-        let _ = self.send_resume(2);
+        let _ = self.send_resume(PYTHON_CMD_STEP_INTO);
     }
 
     pub fn step_out(&self) {
-        let _ = self.send_resume(3);
+        let _ = self.send_resume(PYTHON_CMD_STEP_OUT);
     }
 
     fn send_resume(&self, cmd: i32) -> Result<()> {

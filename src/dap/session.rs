@@ -87,6 +87,11 @@ impl DapSession {
         command: &str,
         args: &Value,
     ) -> ProtocolMessage {
+        // Resuming execution invalidates the previous stop's variable handles.
+        if matches!(command, "configurationDone" | "continue" | "next" | "stepIn" | "stepOut") {
+            self.vars.clear();
+        }
+
         let response_seq = self.next_seq();
         let result = match command {
             "initialize" => {
@@ -127,11 +132,7 @@ impl DapSession {
     }
 
     fn handle_configuration_done(&mut self) -> Result<Value> {
-        self.vars.clear();
-        self.debugger
-            .as_mut()
-            .context("configurationDone: debugger not ready")?
-            .configuration_done()
+        self.require_debugger()?.configuration_done()
     }
 
     fn handle_set_exception_breakpoints(&self) -> Result<Value> {
@@ -160,64 +161,53 @@ impl DapSession {
             })
             .unwrap_or_default();
 
-        self.debugger
-            .as_mut()
-            .context("No debugger attached")?
-            .set_breakpoints(source, &lines)
+        self.require_debugger()?.set_breakpoints(source, &lines)
     }
 
-    fn handle_stack_trace(&self) -> Result<Value> {
-        self.debugger
-            .as_ref()
-            .context("No debugger attached")?
-            .stack_trace()
+    fn handle_stack_trace(&mut self) -> Result<Value> {
+        self.require_debugger()?.stack_trace()
     }
 
     fn handle_scopes(&mut self, args: &Value) -> Result<Value> {
-        let vars = &mut self.vars;
-        self.debugger
-            .as_mut()
-            .context("No debugger attached")?
-            .scopes(args, vars)
+        let (debugger, vars) = self.require_debugger_and_vars()?;
+        debugger.scopes(args, vars)
     }
 
     fn handle_variables(&mut self, args: &Value) -> Result<Value> {
-        let vars = &mut self.vars;
-        self.debugger
-            .as_mut()
-            .context("No debugger attached")?
-            .variables(args, vars)
+        let (debugger, vars) = self.require_debugger_and_vars()?;
+        debugger.variables(args, vars)
     }
 
     fn handle_continue(&mut self) -> Result<Value> {
-        self.vars.clear();
-        self.debugger
-            .as_mut()
-            .context("No debugger attached")?
-            .continue_()
+        self.require_debugger()?.continue_()
     }
 
     fn handle_next(&mut self) -> Result<Value> {
-        self.vars.clear();
-        self.debugger
-            .as_mut()
-            .context("No debugger attached")?
-            .next()
+        self.require_debugger()?.next()
     }
 
     fn handle_step_in(&mut self) -> Result<Value> {
-        self.vars.clear();
-        self.debugger
-            .as_mut()
-            .context("No debugger attached")?
-            .step_in()
+        self.require_debugger()?.step_in()
     }
 
     fn handle_step_out(&mut self) -> Result<Value> {
-        self.vars.clear();
-        self.debugger
-            .as_mut()
-            .context("No debugger attached")?
-            .step_out()
+        self.require_debugger()?.step_out()
+    }
+
+    /// The attached backend, or a uniform "no debugger" error.
+    fn require_debugger(&mut self) -> Result<&mut (dyn DapDebugger + '_)> {
+        self.debugger_mut().context("No debugger attached")
+    }
+
+    /// Backend plus the variables map, for handlers that allocate references.
+    /// (Borrows the two fields separately so both can be handed out at once.)
+    fn require_debugger_and_vars(
+        &mut self,
+    ) -> Result<(&mut (dyn DapDebugger + '_), &mut VariablesMap)> {
+        let debugger = match self.debugger.as_mut() {
+            Some(debugger) => debugger.as_mut(),
+            None => anyhow::bail!("No debugger attached"),
+        };
+        Ok((debugger, &mut self.vars))
     }
 }

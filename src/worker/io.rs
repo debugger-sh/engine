@@ -77,20 +77,12 @@ impl AsyncRead for Stdin {
         let write_idx =
             js_sys::Atomics::load(&self.indices, WRITE_IDX).expect("Loaded write_idx") as u32;
 
-        // Calculate contiguous available bytes (no wrap-around handling)
+        // Contiguous bytes available before the buffer wraps.
         let available = if read_idx <= write_idx {
             write_idx - read_idx
         } else {
             self.data.length() - read_idx
         };
-
-        web_sys::console::log_1(
-            &format!(
-                "R: {:?}, W: {:?}, Available: {:?}",
-                read_idx, write_idx, available
-            )
-            .into(),
-        );
 
         if available == 0 {
             // Wait on the write index

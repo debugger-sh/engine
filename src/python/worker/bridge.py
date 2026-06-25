@@ -1,5 +1,6 @@
 import bdb, json
 
+# Resume commands from the main thread. Must match PYTHON_CMD_* in debug.rs.
 CONTINUE   = 0
 STEP_OVER  = 1
 STEP_INTO  = 2
