@@ -6,7 +6,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
-import type { Backend, BackendOptions, Json } from '../types.ts';
+import type { Backend, BackendOptions, Json } from '../run';
 
 function langForTest(fs: Record<string, Json>): 'c' | 'python' {
   return 'main.py' in fs ? 'python' : 'c';

@@ -7,13 +7,12 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import stripJsonComments from 'strip-json-comments';
 
+import { createDebugpyBackend } from './backends/debugpy.ts';
+import { createEngineBackend } from './backends/engine.ts';
+import { createLldbBackend } from './backends/lldb.ts';
 import { CaptureMap, executeSnippet, match, MatchResult, substitutePlaceholders } from './matcher';
-import { createEngineBackend } from './tests/adapters/c-cpp/engine.ts';
-import { createLldbBackend } from './tests/adapters/c-cpp/lldb.ts';
-import { createDebugpyBackend } from './tests/adapters/python/debugpy.ts';
-import type { Backend, BackendOptions, Json } from './tests/adapters/types.ts';
 
-export type { Backend, BackendOptions, Json };
+export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 
 export type RequestStep = {
   type: 'request';
@@ -40,6 +39,18 @@ export type ExpectStep = {
 export type Step = RequestStep | ResponseStep | EventStep | ExpectStep;
 
 type TestFile = { steps: Step[] };
+
+export type BackendOptions = {
+  testDir: string;
+  testOutputDir: string;
+  fsNode: Record<string, Json>;
+};
+
+export interface Backend {
+  send(req: Json): Promise<Json>;
+  onEvent(cb: (e: Json) => void): void;
+  shutdown(): Promise<void>;
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -80,8 +91,6 @@ type CliOpts = {
   lldb: boolean;
   debugpy: boolean;
 };
-
-const SKIP_TEST_DIRS = new Set(['adapters', 'backend']);
 
 function logInfo(msg: string) {
   console.log(`${chalk.cyan('info')} ${msg}`);
@@ -139,7 +148,6 @@ async function discoverTests(dir: string, prefix = ''): Promise<string[]> {
   );
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    if (SKIP_TEST_DIRS.has(entry.name)) continue;
     const rel = prefix ? testId(prefix, entry.name) : entry.name;
     const abs = path.join(dir, entry.name);
     if (existsSync(path.join(abs, 'dap.jsonc'))) tests.push(rel);

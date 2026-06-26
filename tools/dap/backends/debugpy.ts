@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-import type { Backend, BackendOptions, Json } from '../types.ts';
+import type { Backend, BackendOptions, Json } from '../run';
 
 export async function createDebugpyBackend(opts: BackendOptions): Promise<Backend> {
   const python = await detectPython();
