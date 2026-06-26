@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::dap::types::PythonVar;
+use crate::python::dap::vars::PythonVar;
 
 pub const PYTHON_DEBUG_HEADER: u32 = 12;
 pub const PYTHON_RESPONSE_MAX: usize = 4096 - PYTHON_DEBUG_HEADER as usize;

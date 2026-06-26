@@ -1,2 +1,2 @@
 pub mod adapter;
-mod vars;
+pub(crate) mod vars;

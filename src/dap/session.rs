@@ -4,17 +4,17 @@ use serde_json::{Value, json};
 
 use crate::dap::debugger::DapDebugger;
 use crate::dap::protocol::respond;
-use crate::dap::types::{ProtocolMessage, VariablesMap};
+use crate::dap::types::ProtocolMessage;
 
 /// Shared DAP protocol state. Language backends ([`DapDebugger`]) only supply response
 /// bodies; this type owns sequence numbers, event emission, and response wrapping.
+/// Variable handles are owned by each backend, so this layer is variable-agnostic.
 pub struct DapSession {
     seq_counter: i64,
     debugger: Option<Box<dyn DapDebugger>>,
     client_initialized: bool,
     initialized_emitted: bool,
     callback: Option<js_sys::Function>,
-    vars: VariablesMap,
 }
 
 impl DapSession {
@@ -25,7 +25,6 @@ impl DapSession {
             client_initialized: false,
             initialized_emitted: false,
             callback: None,
-            vars: VariablesMap::default(),
         }
     }
 
@@ -87,11 +86,7 @@ impl DapSession {
         command: &str,
         args: &Value,
     ) -> ProtocolMessage {
-        // Resuming execution invalidates the previous stop's variable handles.
-        if matches!(command, "configurationDone" | "continue" | "next" | "stepIn" | "stepOut") {
-            self.vars.clear();
-        }
-
+        // Variable handles are owned and reset by each backend on every stop.
         let response_seq = self.next_seq();
         let result = match command {
             "initialize" => {
@@ -169,13 +164,11 @@ impl DapSession {
     }
 
     fn handle_scopes(&mut self, args: &Value) -> Result<Value> {
-        let (debugger, vars) = self.require_debugger_and_vars()?;
-        debugger.scopes(args, vars)
+        self.require_debugger()?.scopes(args)
     }
 
     fn handle_variables(&mut self, args: &Value) -> Result<Value> {
-        let (debugger, vars) = self.require_debugger_and_vars()?;
-        debugger.variables(args, vars)
+        self.require_debugger()?.variables(args)
     }
 
     fn handle_continue(&mut self) -> Result<Value> {
@@ -197,17 +190,5 @@ impl DapSession {
     /// The attached backend, or a uniform "no debugger" error.
     fn require_debugger(&mut self) -> Result<&mut (dyn DapDebugger + '_)> {
         self.debugger_mut().context("No debugger attached")
-    }
-
-    /// Backend plus the variables map, for handlers that allocate references.
-    /// (Borrows the two fields separately so both can be handed out at once.)
-    fn require_debugger_and_vars(
-        &mut self,
-    ) -> Result<(&mut (dyn DapDebugger + '_), &mut VariablesMap)> {
-        let debugger = match self.debugger.as_mut() {
-            Some(debugger) => debugger.as_mut(),
-            None => anyhow::bail!("No debugger attached"),
-        };
-        Ok((debugger, &mut self.vars))
     }
 }

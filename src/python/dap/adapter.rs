@@ -3,8 +3,8 @@ use serde_json::{json, Value};
 use wasm_bindgen::JsValue;
 
 use crate::dap::debugger::DapDebugger;
-use crate::dap::types::{requested_range, VariableReference, VariablesMap};
-use crate::python::dap::vars::python_var_to_dap;
+use crate::dap::types::requested_range;
+use crate::python::dap::vars::PythonVars;
 use crate::python::debug::Debugger;
 
 /// DAP backend for Python (Bdb bridge over a shared memory buffer).
@@ -13,11 +13,13 @@ pub struct PythonBackend {
     /// When true, internal frames (bdb, bridge) are omitted from `stackTrace` responses.
     /// Internal frames are always tagged with `presentationHint: "subtle"` regardless.
     filter_internals: bool,
+    /// Variable handles for the current stop (rebuilt each pause).
+    vars: PythonVars,
 }
 
 impl PythonBackend {
     pub fn new(debugger: Debugger, filter_internals: bool) -> Self {
-        Self { debugger, filter_internals }
+        Self { debugger, filter_internals, vars: PythonVars::default() }
     }
 }
 
@@ -60,11 +62,11 @@ impl DapDebugger for PythonBackend {
         }))
     }
 
-    fn scopes(&mut self, args: &Value, vars: &mut VariablesMap) -> Result<Value> {
+    fn scopes(&mut self, args: &Value) -> Result<Value> {
         let frame_id = args.get("frameId").and_then(|v| v.as_i64()).unwrap_or(0) as usize;
         let locals = self.debugger.locals(frame_id)?.to_vec();
         let named_variables = locals.len();
-        let reference = vars.allocate_python(locals);
+        let reference = self.vars.allocate(locals);
         Ok(json!({
             "scopes": [{
                 "name": "Locals",
@@ -75,25 +77,22 @@ impl DapDebugger for PythonBackend {
         }))
     }
 
-    fn variables(&mut self, args: &Value, vars: &mut VariablesMap) -> Result<Value> {
+    fn variables(&mut self, args: &Value) -> Result<Value> {
         let reference = args
             .get("variablesReference")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        let reference = vars
+        let nodes = self
+            .vars
             .get(reference)
             .context("Unknown variablesReference")?
             .clone();
 
-        let VariableReference::Python(nodes) = reference else {
-            anyhow::bail!("Python variablesReference is not expandable");
-        };
-
         let range = requested_range(args, nodes.len());
         let variables: Vec<Value> = nodes[range]
             .iter()
-            .map(|node| python_var_to_dap(node, vars))
+            .map(|node| self.vars.to_dap(node))
             .collect();
         Ok(json!({ "variables": variables }))
     }
@@ -124,6 +123,7 @@ impl DapDebugger for PythonBackend {
             .and_then(|v| v.as_string())
             .context("python paused message missing frame")?;
         let reason = self.debugger.on_pause(&frame)?;
+        self.vars.clear();
         Ok(json!({
             "reason": reason,
             "threadId": 1,

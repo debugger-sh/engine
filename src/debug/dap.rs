@@ -1,27 +1,63 @@
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use wasm_bindgen::JsValue;
 
 use crate::dap::debugger::DapDebugger;
-use crate::dap::types::{requested_range, VariableReference, VariablesMap};
+use crate::dap::types::requested_range;
 use crate::debug::formatters::ChildCounts;
 use crate::debug::{Debugger, Variable};
 use crate::types::PauseReason;
 use crate::util::Ref;
 
+/// A handle handed out via a DAP `variablesReference`: a flat scope list, or one
+/// expandable variable (with its child counts cached to avoid recomputing them).
+#[derive(Clone)]
+enum DwarfRef {
+    List(Vec<Variable>),
+    Variable { var: Variable, counts: ChildCounts },
+}
+
+/// Per-stop table of DWARF variable handles, rebuilt on each pause so stale
+/// handles from a previous stop never resolve.
+#[derive(Default)]
+struct DwarfVars {
+    next_ref: i64,
+    entries: HashMap<i64, DwarfRef>,
+}
+
+impl DwarfVars {
+    fn clear(&mut self) {
+        self.next_ref = 0;
+        self.entries.clear();
+    }
+
+    fn allocate(&mut self, reference: DwarfRef) -> i64 {
+        self.next_ref += 1;
+        self.entries.insert(self.next_ref, reference);
+        self.next_ref
+    }
+
+    fn get(&self, reference: i64) -> Option<&DwarfRef> {
+        self.entries.get(&reference)
+    }
+}
+
 /// DAP backend for DWARF-instrumented languages (C, C++, Rust, etc.).
 pub struct DwarfBackend {
     debugger: Ref<Debugger>,
+    vars: DwarfVars,
 }
 
 impl DwarfBackend {
     pub fn new(debugger: Ref<Debugger>) -> Self {
-        Self { debugger }
+        Self { debugger, vars: DwarfVars::default() }
     }
 
-    fn scope_response(&self, name: &str, vars: Vec<Variable>, vars_map: &mut VariablesMap) -> Value {
+    fn scope_response(&mut self, name: &str, vars: Vec<Variable>) -> Value {
         let nvars = vars.len();
-        let reference = vars_map.allocate(vars);
+        let reference = self.vars.allocate(DwarfRef::List(vars));
         json!({
             "name": name,
             "variablesReference": reference,
@@ -30,19 +66,13 @@ impl DwarfBackend {
         })
     }
 
-    fn variable_response(
-        &self,
-        var: &Variable,
-        vars_map: &mut VariablesMap,
-    ) -> Result<Value> {
+    fn variable_response(&mut self, var: &Variable) -> Result<Value> {
         let counts = var.num_children().unwrap_or_default();
         let sub_ref = if counts.is_empty() {
             0
         } else {
-            match vars_map.allocate_variable(var.clone(), counts.clone()) {
-                Ok(r) => r,
-                Err(_) => 0,
-            }
+            self.vars
+                .allocate(DwarfRef::Variable { var: var.clone(), counts: counts.clone() })
         };
 
         let display = match var.display() {
@@ -119,31 +149,32 @@ impl DapDebugger for DwarfBackend {
         }))
     }
 
-    fn scopes(&mut self, args: &Value, vars: &mut VariablesMap) -> Result<Value> {
+    fn scopes(&mut self, args: &Value) -> Result<Value> {
         let frame_id = args.get("frameId").and_then(|v| v.as_i64()).unwrap_or(0) as u32;
         let variables = self.debugger.get_variables(frame_id)?;
 
         let mut scopes: Vec<Value> = Vec::new();
         if !variables.arguments.is_empty() {
-            scopes.push(self.scope_response("Arguments", variables.arguments, vars));
+            scopes.push(self.scope_response("Arguments", variables.arguments));
         }
         if !variables.locals.is_empty() {
-            scopes.push(self.scope_response("Locals", variables.locals, vars));
+            scopes.push(self.scope_response("Locals", variables.locals));
         }
         if !variables.globals.is_empty() {
-            scopes.push(self.scope_response("Globals", variables.globals, vars));
+            scopes.push(self.scope_response("Globals", variables.globals));
         }
 
         Ok(json!({ "scopes": scopes }))
     }
 
-    fn variables(&mut self, args: &Value, vars: &mut VariablesMap) -> Result<Value> {
+    fn variables(&mut self, args: &Value) -> Result<Value> {
         let reference = args
             .get("variablesReference")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
 
-        let reference = vars
+        let reference = self
+            .vars
             .get(reference)
             .context("Unknown variablesReference")?
             .clone();
@@ -151,7 +182,7 @@ impl DapDebugger for DwarfBackend {
         let entries = requested_children(args, &reference)?;
         let variables: Result<Vec<_>> = entries
             .iter()
-            .map(|var| self.variable_response(var, vars))
+            .map(|var| self.variable_response(var))
             .collect();
         Ok(json!({
             "variables": variables?
@@ -179,6 +210,7 @@ impl DapDebugger for DwarfBackend {
     }
 
     fn handle_paused(&mut self, msg: &JsValue) -> Result<Value> {
+        self.vars.clear();
         let reason = js_sys::Reflect::get(msg, &"reason".into())
             .map_err(|_| anyhow!("paused message missing reason"))?;
         let reason: PauseReason = serde_wasm_bindgen::from_value(reason)
@@ -194,14 +226,11 @@ impl DapDebugger for DwarfBackend {
     }
 }
 
-fn requested_children(args: &Value, reference: &VariableReference) -> Result<Vec<Variable>> {
+fn requested_children(args: &Value, reference: &DwarfRef) -> Result<Vec<Variable>> {
     let filter = args.get("filter").and_then(|v| v.as_str());
 
     match reference {
-        VariableReference::Python(_) => {
-            Err(anyhow!("Python variables are expanded by the Python DAP backend"))
-        }
-        VariableReference::List(entries) => {
+        DwarfRef::List(entries) => {
             let range = requested_range(args, entries.len());
             match filter {
                 Some("indexed") => Ok(Vec::default()),
@@ -210,7 +239,7 @@ fn requested_children(args: &Value, reference: &VariableReference) -> Result<Vec
             }
         }
 
-        VariableReference::Variable { var, counts } => match filter {
+        DwarfRef::Variable { var, counts } => match filter {
             Some("indexed") => {
                 let range = requested_range(args, counts.indexed);
                 var.indexed_children(range)
