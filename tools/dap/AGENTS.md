@@ -53,15 +53,31 @@ Each test is a directory under `tools/dap/tests/` (at any depth) with a required
 
 ## Language tests
 
-Language-specific scenarios live under `tools/dap/tests/<language>/`:
+A test's language is declared by a top-level `"lang"` field in its `dap.jsonc`
+(defaults to `"c"` when omitted):
+
+```jsonc
+{
+  "lang": "python",
+  "steps": [
+    /* … */
+  ]
+}
+```
+
+The `lang` field — not the directory name — selects which engine the test runs
+against (`Engine.create(lang)`). By convention tests still live under
+`tools/dap/tests/<language>/`:
 
 ```
 npm run tools:dap -- python
 npm run tools:dap -- python/basic
 ```
 
-- `python/` — auto-selects the `debugpy` adapter (`python3 -m pip install debugpy`; set `PYTHON=/path/to/python3` to override)
-- Adapter code lives in `tests/adapters/` (skipped by test discovery)
+- By default every test runs against the **engine**. Golden-reference adapters are opt-in:
+  - `--lldb` runs `c` tests against `lldb-dap`
+  - `--debugpy` runs `python` tests against `debugpy` (`python3 -m pip install debugpy`; set `PYTHON=/path/to/python3` to override)
+- Backend adapters live in `tools/dap/backends/` (`engine.ts`, `lldb.ts`, `debugpy.ts`)
 
 Python tests mirror the C++ trace shape: `setBreakpoints` → `stopped` → `stackTrace` → `scopes` → `variables`. See `python/basic` (single frame) and `python/frames` (call stack).
 

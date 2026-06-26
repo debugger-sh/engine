@@ -38,12 +38,15 @@ export type ExpectStep = {
 };
 export type Step = RequestStep | ResponseStep | EventStep | ExpectStep;
 
-type TestFile = { steps: Step[] };
+type TestFile = { steps: Step[]; lang?: Lang };
+
+export type Lang = 'c' | 'python';
 
 export type BackendOptions = {
   testDir: string;
   testOutputDir: string;
   fsNode: Record<string, Json>;
+  lang: Lang;
 };
 
 export interface Backend {
@@ -158,6 +161,13 @@ async function discoverTests(dir: string, prefix = ''): Promise<string[]> {
 
 async function listTestNames(): Promise<string[]> {
   return discoverTests(TESTS_DIR);
+}
+
+async function readTestLang(testName: string): Promise<Lang> {
+  const dapPath = path.join(testDirFor(testName), 'dap.jsonc');
+  if (!existsSync(dapPath)) return 'c';
+  const file = await readJsonFile<TestFile>(dapPath);
+  return file.lang ?? 'c';
 }
 
 function expandTestSelection(requested: string[], available: string[]): string[] {
@@ -298,16 +308,17 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
   await rm(testOutputDir, { recursive: true, force: true });
   await mkdir(testOutputDir, { recursive: true });
 
+  const lang: Lang = file.lang ?? 'c';
   const fsNode = await collectFsNode(testDir);
-  const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode };
-  const isPython = testName.startsWith('python/');
-  const backend = isPython
-    ? opts.debugpy
-      ? await createDebugpyBackend(backendOpts)
-      : await createEngineBackend(backendOpts)
-    : opts.lldb
-      ? await createLldbBackend(backendOpts)
-      : await createEngineBackend(backendOpts);
+  const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode, lang };
+  const backend =
+    lang === 'python'
+      ? opts.debugpy
+        ? await createDebugpyBackend(backendOpts)
+        : await createEngineBackend(backendOpts)
+      : opts.lldb
+        ? await createLldbBackend(backendOpts)
+        : await createEngineBackend(backendOpts);
 
   const eventQueue: Json[] = [];
   const rawDapLog: Json[] = [];
@@ -417,10 +428,10 @@ async function main() {
   if (available.length === 0) die(`no tests found in ${TESTS_DIR}`);
   const tests = opts.tests.length ? expandTestSelection(opts.tests, available) : available;
 
-  const cppTests = tests.filter((t) => !t.startsWith('python/'));
-  const pythonTests = tests.filter((t) => t.startsWith('python/'));
-  const hasEngine =
-    (cppTests.length > 0 && !opts.lldb) || (pythonTests.length > 0 && !opts.debugpy);
+  const langs = new Map<string, Lang>();
+  for (const t of tests) langs.set(t, await readTestLang(t));
+  const pythonTests = tests.filter((t) => langs.get(t) === 'python');
+  const hasEngine = tests.some((t) => (langs.get(t) === 'python' ? !opts.debugpy : !opts.lldb));
 
   if (hasEngine) {
     await waitForDevBuild();

@@ -8,14 +8,9 @@ import process from 'node:process';
 
 import type { Backend, BackendOptions, Json } from '../run';
 
-function langForTest(fs: Record<string, Json>): 'c' | 'python' {
-  return 'main.py' in fs ? 'python' : 'c';
-}
-
 export async function createEngineBackend(opts: BackendOptions): Promise<Backend> {
   const { Engine } = await import('debugger-sh');
-  const lang = langForTest(opts.fsNode);
-  const engine = await Engine.create(lang);
+  const engine = await Engine.create(opts.lang);
   engine.debugger.enabled = true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   engine.fs = opts.fsNode as unknown as any;
