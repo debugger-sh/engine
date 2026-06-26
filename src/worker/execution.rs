@@ -38,6 +38,8 @@ pub struct Step<'a> {
     sysroot: Option<String>,
     union_fs: Option<Box<dyn FileSystem>>,
     debug: bool,
+    envs: Vec<(String, String)>,
+    device_files: Vec<(PathBuf, Box<dyn wasmer_wasix::virtual_fs::VirtualFile + Send + Sync>)>,
 }
 
 impl Execution {
@@ -56,6 +58,8 @@ impl Execution {
             sysroot: None,
             union_fs: None,
             debug: false,
+            envs: Vec::new(),
+            device_files: Vec::new(),
         }
     }
 
@@ -122,8 +126,27 @@ impl<'a> Step<'a> {
         self
     }
 
+    pub fn envs<I, K, V>(mut self, envs: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
+    {
+        self.envs.extend(
+            envs.into_iter()
+                .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string())),
+        );
+        self
+    }
+
+    pub fn device_file(mut self, path: &str, file: Box<dyn wasmer_wasix::virtual_fs::VirtualFile + Send + Sync>) -> Self {
+        self.device_files
+            .push((PathBuf::from(path), file));
+        self
+    }
+
     /// Runs this step to completion
-    pub async fn run(self) -> Result<ExitCode, RuntimeError> {
+    pub async fn run(mut self) -> Result<ExitCode, RuntimeError> {
         /* Download the binary from the URL / filesystem */
         let Some(binary_loc) = &self.binary else {
             return Err(RuntimeError::new("No binary specified"));
@@ -188,7 +211,18 @@ impl<'a> Step<'a> {
             self.exec.fs.union(&union_fs);
         }
 
+        for (path, file) in self.device_files {
+            self.exec
+                .fs
+                .new_open_options_ext()
+                .insert_device_file(path, file)
+                .ensure("Registered device file")?;
+        }
+
         /* Configure Wasmer WASI environment */
+        for (k, v) in &self.envs {
+            self.builder.add_env(k, v);
+        }
         let mut builder = self
             .builder
             .runtime(JsRuntime::instance())

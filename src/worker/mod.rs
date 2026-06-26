@@ -4,10 +4,10 @@ use wasm_bindgen::prelude::*;
 use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, create_dir_all, mem_fs};
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
 
-use crate::types::{FsNode, WorkerOut, WorkerStart};
+use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};
 
 mod debuggee;
-mod execution;
+pub(crate) mod execution;
 mod io;
 mod runtime;
 
@@ -17,7 +17,7 @@ use execution::Execution;
 // │ Helpers                                                                  │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-async fn create_user_fs(node: FsNode) -> Result<mem_fs::FileSystem, std::io::Error> {
+pub(crate) async fn create_user_fs(node: FsNode) -> Result<mem_fs::FileSystem, std::io::Error> {
     let fs = mem_fs::FileSystem::default();
     create_user_fs_rec(&fs, &PathBuf::from("/"), &node).await?;
     Ok(fs)
@@ -87,7 +87,18 @@ fn collect_dir_sources(
 // │ Worker                                                                   │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
+// Single source of truth for these is `prefetch_urls` in lib.rs (warmed by the host).
+pub(crate) const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm";
+pub(crate) const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz";
+
 async fn start(msg: WorkerStart) {
+    match msg.lang {
+        Lang::C => start_cpp(msg).await,
+        Lang::Python => crate::python::worker::start(msg).await,
+    }
+}
+
+async fn start_cpp(msg: WorkerStart) {
     let mut sources = Vec::new();
     collect_dir_sources(&msg.fs, &PathBuf::from("/"), &mut sources);
     sources.sort();
@@ -148,11 +159,11 @@ async fn start(msg: WorkerStart) {
         let mut step = exec
             .step("clang")
             // from @yowasp
-            .binary("https://fabioibanez.github.io/website/llvm.core.wasm")
+            .binary(CPP_WASM_URL)
             .args(&clang_args);
         if let Some(fs) = union_fs.take() {
             step = step
-                .sysroot("https://fabioibanez.github.io/website/llvm-resources.tar.gz")
+                .sysroot(CPP_STDLIB_URL)
                 .fs(fs);
         }
         let exit = step.run().await.expect("Compilation succeeded");
@@ -187,7 +198,7 @@ async fn start(msg: WorkerStart) {
 
     let exit = exec
         .step("wasm-ld")
-        .binary("https://fabioibanez.github.io/website/llvm.core.wasm")
+        .binary(CPP_WASM_URL)
         .args(&link_args)
         .run()
         .await

@@ -7,6 +7,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import stripJsonComments from 'strip-json-comments';
 
+import { createDebugpyBackend } from './backends/debugpy.ts';
 import { createEngineBackend } from './backends/engine.ts';
 import { createLldbBackend } from './backends/lldb.ts';
 import { CaptureMap, executeSnippet, match, MatchResult, substitutePlaceholders } from './matcher';
@@ -37,12 +38,15 @@ export type ExpectStep = {
 };
 export type Step = RequestStep | ResponseStep | EventStep | ExpectStep;
 
-type TestFile = { steps: Step[] };
+type TestFile = { steps: Step[]; lang?: Lang };
+
+export type Lang = 'c' | 'python';
 
 export type BackendOptions = {
   testDir: string;
   testOutputDir: string;
   fsNode: Record<string, Json>;
+  lang: Lang;
 };
 
 export interface Backend {
@@ -82,12 +86,13 @@ const COMMON_INIT_STEPS: Step[] = [
       stopOnEntry: false
     }
   },
-  { type: 'event', event: 'initialized', $timeout: 10000 }
+  { type: 'event', event: 'initialized', $timeout: 30000 }
 ];
 
 type CliOpts = {
   tests: string[];
   lldb: boolean;
+  debugpy: boolean;
 };
 
 function logInfo(msg: string) {
@@ -109,17 +114,20 @@ function die(msg: string): never {
 
 function parseCli(argv: string[]): CliOpts {
   let lldb = false;
+  let debugpy = false;
   const tests: string[] = [];
   for (const arg of argv) {
     if (arg === '--lldb') {
       lldb = true;
+    } else if (arg === '--debugpy') {
+      debugpy = true;
     } else if (arg.startsWith('--')) {
       die(`unknown flag: ${arg}`);
     } else {
       tests.push(arg);
     }
   }
-  return { tests, lldb };
+  return { tests, lldb, debugpy };
 }
 
 async function ensureEngineLinked() {
@@ -153,6 +161,13 @@ async function discoverTests(dir: string, prefix = ''): Promise<string[]> {
 
 async function listTestNames(): Promise<string[]> {
   return discoverTests(TESTS_DIR);
+}
+
+async function readTestLang(testName: string): Promise<Lang> {
+  const dapPath = path.join(testDirFor(testName), 'dap.jsonc');
+  if (!existsSync(dapPath)) return 'c';
+  const file = await readJsonFile<TestFile>(dapPath);
+  return file.lang ?? 'c';
 }
 
 function expandTestSelection(requested: string[], available: string[]): string[] {
@@ -293,11 +308,17 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
   await rm(testOutputDir, { recursive: true, force: true });
   await mkdir(testOutputDir, { recursive: true });
 
+  const lang: Lang = file.lang ?? 'c';
   const fsNode = await collectFsNode(testDir);
-  const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode };
-  const backend = opts.lldb
-    ? await createLldbBackend(backendOpts)
-    : await createEngineBackend(backendOpts);
+  const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode, lang };
+  const backend =
+    lang === 'python'
+      ? opts.debugpy
+        ? await createDebugpyBackend(backendOpts)
+        : await createEngineBackend(backendOpts)
+      : opts.lldb
+        ? await createLldbBackend(backendOpts)
+        : await createEngineBackend(backendOpts);
 
   const eventQueue: Json[] = [];
   const rawDapLog: Json[] = [];
@@ -403,18 +424,25 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
 async function main() {
   const opts = parseCli(process.argv.slice(2));
 
-  if (!opts.lldb) {
+  const available = await listTestNames();
+  if (available.length === 0) die(`no tests found in ${TESTS_DIR}`);
+  const tests = opts.tests.length ? expandTestSelection(opts.tests, available) : available;
+
+  const langs = new Map<string, Lang>();
+  for (const t of tests) langs.set(t, await readTestLang(t));
+  const pythonTests = tests.filter((t) => langs.get(t) === 'python');
+  const hasEngine = tests.some((t) => (langs.get(t) === 'python' ? !opts.debugpy : !opts.lldb));
+
+  if (hasEngine) {
     await waitForDevBuild();
     if (!existsSync(path.join(ROOT, 'dist/debugger-sh.js')))
       die(`missing dist/debugger-sh.js. Run 'npm run build' first.`);
     await ensureEngineLinked();
-  } else {
-    logInfo(`${chalk.bold('--lldb')}: running against ${chalk.bold('lldb-dap')}`);
   }
-
-  const available = await listTestNames();
-  if (available.length === 0) die(`no tests found in ${TESTS_DIR}`);
-  const tests = opts.tests.length ? expandTestSelection(opts.tests, available) : available;
+  if (opts.lldb)
+    logInfo(`${chalk.bold('--lldb')}: running C/C++ against ${chalk.bold('lldb-dap')}`);
+  if (opts.debugpy && pythonTests.length)
+    logInfo(`${chalk.bold('--debugpy')}: running Python against ${chalk.bold('debugpy')}`);
 
   const failed: { name: string; error: string }[] = [];
 

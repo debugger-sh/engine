@@ -1,23 +1,13 @@
 import EventEmitter from 'events';
 
-import { StdoutMode, WorkerOut, WorkerStart } from '../../pkg/engine';
+import { prefetch_urls, StdoutMode, WorkerOut, WorkerStart } from '../../pkg/engine';
 import init from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
 import { errorResult, Internals } from './util';
 import RustWorker from './worker?worker&inline';
 
-// Warms the browser HTTP cache at module load so the worker's fetch on run() hits cache.
-const LLVM_PREFETCH_URLS = [
-  'https://fabioibanez.github.io/website/llvm.core.wasm',
-  'https://fabioibanez.github.io/website/llvm-resources.tar.gz'
-];
-
-if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
-  for (const url of LLVM_PREFETCH_URLS) void fetch(url, { cache: 'force-cache' });
-}
-
-export type Lang = 'c';
+export type Lang = 'c' | 'python';
 
 /** The engine ran to completion with the provided `exitCode`. */
 export type CompletedResult = { type: 'completed'; exitCode: number };
@@ -58,6 +48,8 @@ export class Engine {
 
   static async create(lang: Lang): Promise<Engine> {
     await init({ module_or_path: wasmBinary });
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
+      for (const url of prefetch_urls(lang)) void fetch(url, { cache: 'force-cache' });
     return new Engine(lang);
   }
 
@@ -110,12 +102,18 @@ export class Engine {
         worker.addEventListener('message', (message: MessageEvent<WorkerOut>) => {
           if (message.data.type === 'stop')
             resolve({ type: 'completed', exitCode: message.data.exit_code });
+          else if (message.data.type === 'error')
+            resolve({
+              type: 'error',
+              error: { type: 'EngineError', message: message.data.message }
+            });
         });
 
         const message: WorkerStart = {
           fs: this.fs,
           stdin_buffer: this.stdin[Internals].buffer,
-          is_debug: this.debugger.enabled
+          is_debug: this.debugger.enabled,
+          lang: this.lang
         };
         worker.postMessage(message);
       });

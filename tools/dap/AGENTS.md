@@ -51,6 +51,36 @@ Each test is a directory under `tools/dap/tests/` (at any depth) with a required
 4. Start from an existing test and keep expectations minimal-but-specific (assert only fields that should be stable).
 5. Run `npm run tools:dap -- <path-to-test>`; inspect `tools/dap/output/<path-to-test>/` and console mismatch output when iterating.
 
+## Language tests
+
+A test's language is declared by a top-level `"lang"` field in its `dap.jsonc`
+(defaults to `"c"` when omitted):
+
+```jsonc
+{
+  "lang": "python",
+  "steps": [
+    /* … */
+  ]
+}
+```
+
+The `lang` field — not the directory name — selects which engine the test runs
+against (`Engine.create(lang)`). By convention tests still live under
+`tools/dap/tests/<language>/`:
+
+```
+npm run tools:dap -- python
+npm run tools:dap -- python/basic
+```
+
+- By default every test runs against the **engine**. Golden-reference adapters are opt-in:
+  - `--lldb` runs `c` tests against `lldb-dap`
+  - `--debugpy` runs `python` tests against `debugpy` (`python3 -m pip install debugpy`; set `PYTHON=/path/to/python3` to override)
+- Backend adapters live in `tools/dap/backends/` (`engine.ts`, `lldb.ts`, `debugpy.ts`)
+
+Python tests mirror the C++ trace shape: `setBreakpoints` → `stopped` → `stackTrace` → `scopes` → `variables`. See `python/basic` (single frame) and `python/frames` (call stack).
+
 ## Running Against `lldb-dap` (Golden Reference)
 
 For any test, you can run the same `dap.jsonc` scenario against a real `lldb-dap` subprocess instead of the engine:

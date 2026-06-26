@@ -1,3 +1,4 @@
+pub mod dap;
 mod debug;
 pub mod dwarf;
 pub mod formatters;

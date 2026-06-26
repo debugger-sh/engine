@@ -10,7 +10,8 @@ import type { Backend, BackendOptions, Json } from '../run';
 
 export async function createEngineBackend(opts: BackendOptions): Promise<Backend> {
   const { Engine } = await import('debugger-sh');
-  const engine = await Engine.create('c');
+  const engine = await Engine.create(opts.lang);
+  engine.debugger.enabled = true;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   engine.fs = opts.fsNode as unknown as any;
 

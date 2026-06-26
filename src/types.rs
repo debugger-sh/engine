@@ -98,6 +98,13 @@ pub enum FsNode {
     Dir(HashMap<String, FsNode>),
 }
 
+#[derive(Debug, Clone, Copy, Tsify, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Lang {
+    C,
+    Python,
+}
+
 #[derive(Debug, Tsify, Deserialize)]
 pub struct WorkerStart {
     pub fs: HashMap<String, FsNode>,
@@ -105,6 +112,7 @@ pub struct WorkerStart {
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub stdin_buffer: js_sys::SharedArrayBuffer,
     pub is_debug: bool,
+    pub lang: Lang,
 }
 
 #[derive(Clone, Copy, Debug, Tsify, Serialize_repr)]
@@ -130,6 +138,12 @@ pub enum WorkerOut<'a> {
     #[serde(rename = "debug")]
     Debug { info: DebugInfo },
 
+    #[serde(rename = "python_debug")]
+    PythonDebug {
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        state: js_sys::SharedArrayBuffer,
+    },
+
     /// Emit a build/engine artifact for the main thread to consume.
     #[serde(rename = "artifact")]
     Artifact {
@@ -139,11 +153,24 @@ pub enum WorkerOut<'a> {
         name: String,
     },
 
-    /// Indicate that execution has paused
+    /// Indicate that execution has paused.
+    ///
+    /// DWARF backends send `reason`; Python sends a `frame` snapshot it derives the
+    /// reason from. Each backend reads only its own field (see `DapDebugger::handle_paused`).
     #[serde(rename = "paused")]
-    Paused { reason: PauseReason },
+    Paused {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<PauseReason>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        frame: Option<String>,
+    },
     #[serde(rename = "stop")]
     Stop { exit_code: i32 },
+
+    /// A setup/runtime failure in the engine itself (e.g. the language runtime
+    /// failed to load) — distinct from the user's program exiting non-zero.
+    #[serde(rename = "error")]
+    Error { message: String },
 }
 
 impl<'a> WorkerOut<'a> {

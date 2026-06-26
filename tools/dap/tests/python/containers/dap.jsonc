@@ -1,0 +1,195 @@
+{
+  "lang": "python",
+  "steps": [
+    {
+      "type": "request",
+      "command": "setBreakpoints",
+      "arguments": {
+        "source": { "path": "main.py" },
+        "breakpoints": [{ "line": 12 }]
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "breakpoints": {
+          "$array.contains": [{ "line": 12, "verified": true }]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "configurationDone",
+      "arguments": {}
+    },
+    {
+      "type": "event",
+      "event": "stopped",
+      "body": {
+        "reason": "breakpoint",
+        "threadId": "${{thread}}"
+      },
+      "$timeout": 30000
+    },
+    {
+      "type": "request",
+      "command": "stackTrace",
+      "arguments": { "threadId": "{{thread}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "stackFrames": {
+          "$array.contains": [{ "name": "main", "id": "${{frame}}" }]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "scopes",
+      "arguments": { "frameId": "{{frame}}" }
+    },
+    {
+      "type": "response",
+      "body": {
+        "scopes": {
+          "$array.contains": [
+            {
+              "name": "Locals",
+              "variablesReference": "${{locals}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{locals}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            { "name": "data", "value": "dict[1]", "variablesReference": "${{data}}" },
+            { "name": "items", "value": "list[3]", "variablesReference": "${{items}}" },
+            { "name": "carol", "value": "User[2]", "variablesReference": "${{carol}}" },
+            { "name": "x", "value": "1", "variablesReference": 0 }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{data}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            { "name": "users", "value": "list[2]", "variablesReference": "${{users}}" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{users}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            { "name": "[0]", "variablesReference": "${{user0}}" },
+            { "name": "[1]", "variablesReference": "${{user1}}" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{user0}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            { "name": "id", "value": "1", "variablesReference": 0 },
+            { "name": "name", "value": "'alice'", "variablesReference": 0 }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{items}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": [
+          { "name": "[0]", "value": "10", "variablesReference": 0 },
+          { "name": "[1]", "value": "20", "variablesReference": 0 },
+          { "name": "[2]", "value": "30", "variablesReference": 0 }
+        ]
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{carol}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": {
+          "$array.contains": [
+            { "name": "name", "value": "'carol'", "variablesReference": 0 },
+            { "name": "scores", "value": "list[2]", "variablesReference": "${{scores}}" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{scores}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": [
+          { "name": "[0]", "value": "100", "variablesReference": 0 },
+          { "name": "[1]", "value": "92", "variablesReference": 0 }
+        ]
+      }
+    },
+    {
+      "type": "request",
+      "command": "continue",
+      "arguments": { "threadId": "{{thread}}" }
+    }
+  ]
+}
