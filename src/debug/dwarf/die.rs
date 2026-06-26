@@ -47,6 +47,29 @@ impl<'a> DerefContext<'a> {
     }
 }
 
+pub type DieRange = (CodeOffset, CodeOffset);
+
+#[derive(Debug, Clone)]
+pub struct DieRanges(Vec<DieRange>);
+
+impl DieRanges {
+    pub fn is_empty(&self) -> bool {
+        if self.0.is_empty() {
+            return true;
+        }
+
+        !self.0.iter().any(|(begin, end)| end > begin)
+    }
+
+    pub fn single(&self) -> Option<&DieRange> {
+        if self.0.len() != 1 {
+            return None;
+        }
+
+        self.0.get(0)
+    }
+}
+
 pub struct Die<'a> {
     ctx: DerefContext<'a>,
     die: gimli::DebuggingInformationEntry<R>,
