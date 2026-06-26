@@ -288,7 +288,7 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
 
   const fsNode = await collectFsNode(testDir);
   const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode };
-  const backend = testName.startsWith('lang/python/')
+  const backend = testName.startsWith('python/')
     ? await createDebugpyBackend(backendOpts)
     : opts.lldb
       ? await createLldbBackend(backendOpts)
@@ -402,8 +402,8 @@ async function main() {
   if (available.length === 0) die(`no tests found in ${TESTS_DIR}`);
   const tests = opts.tests.length ? expandTestSelection(opts.tests, available) : available;
 
-  const hasPython = tests.some((t) => t.startsWith('lang/python/'));
-  const hasEngine = tests.some((t) => !t.startsWith('lang/python/') && !opts.lldb);
+  const hasPython = tests.some((t) => t.startsWith('python/'));
+  const hasEngine = tests.some((t) => !t.startsWith('python/') && !opts.lldb);
 
   if (hasEngine) {
     await waitForDevBuild();
@@ -412,7 +412,7 @@ async function main() {
     await ensureEngineLinked();
   }
   if (opts.lldb) logInfo(`${chalk.bold('--lldb')}: running against ${chalk.bold('lldb-dap')}`);
-  if (hasPython) logInfo(`${chalk.bold('lang/python')}: running against ${chalk.bold('debugpy')}`);
+  if (hasPython) logInfo(`${chalk.bold('python')}: running against ${chalk.bold('debugpy')}`);
 
   const failed: { name: string; error: string }[] = [];
 

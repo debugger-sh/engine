@@ -51,19 +51,19 @@ Each test is a directory under `tools/dap/tests/` (at any depth) with a required
 4. Start from an existing test and keep expectations minimal-but-specific (assert only fields that should be stable).
 5. Run `npm run tools:dap -- <path-to-test>`; inspect `tools/dap/output/<path-to-test>/` and console mismatch output when iterating.
 
-## Language tests (`tests/lang/`)
+## Language tests
 
-Language-specific scenarios live under `tools/dap/tests/lang/<language>/`:
+Language-specific scenarios live under `tools/dap/tests/<language>/`:
 
 ```
-npm run tools:dap -- lang/python
-npm run tools:dap -- lang/python/basic
+npm run tools:dap -- python
+npm run tools:dap -- python/basic
 ```
 
-- `lang/python/` — auto-selects the `debugpy` adapter (`python3 -m pip install debugpy`; set `PYTHON=/path/to/python3` to override)
+- `python/` — auto-selects the `debugpy` adapter (`python3 -m pip install debugpy`; set `PYTHON=/path/to/python3` to override)
 - Adapter code lives in `tests/lang/adapters/` (skipped by test discovery)
 
-Python tests mirror the C++ trace shape: `setBreakpoints` → `stopped` → `stackTrace` → `scopes` → `variables`. See `lang/python/basic` (single frame) and `lang/python/frames` (call stack).
+Python tests mirror the C++ trace shape: `setBreakpoints` → `stopped` → `stackTrace` → `scopes` → `variables`. See `python/basic` (single frame) and `python/frames` (call stack).
 
 ## Running Against `lldb-dap` (Golden Reference)
 
