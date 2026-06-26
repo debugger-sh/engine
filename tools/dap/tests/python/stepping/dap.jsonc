@@ -4,7 +4,7 @@
       "type": "request",
       "command": "setBreakpoints",
       "arguments": {
-        "source": { "path": "/main.py" },
+        "source": { "path": "main.py" },
         "breakpoints": [{ "line": 2 }]
       }
     },
@@ -43,8 +43,7 @@
             {
               "id": "${{frame}}",
               "name": "__main__",
-              "line": 2,
-              "source": { "path": "/main.py" }
+              "line": 2
             }
           ]
         }
@@ -61,7 +60,8 @@
       "body": {
         "reason": "step",
         "threadId": "{{thread}}"
-      }
+      },
+      "$timeout": 30000
     },
     {
       "type": "request",
@@ -74,8 +74,7 @@
         "stackFrames": {
           "$array.prefix": [
             {
-              "line": 3,
-              "source": { "path": "/main.py" }
+              "line": 3
             }
           ]
         }

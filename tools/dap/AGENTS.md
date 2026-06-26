@@ -61,7 +61,7 @@ npm run tools:dap -- python/basic
 ```
 
 - `python/` — auto-selects the `debugpy` adapter (`python3 -m pip install debugpy`; set `PYTHON=/path/to/python3` to override)
-- Adapter code lives in `tests/lang/adapters/` (skipped by test discovery)
+- Adapter code lives in `tests/adapters/` (skipped by test discovery)
 
 Python tests mirror the C++ trace shape: `setBreakpoints` → `stopped` → `stackTrace` → `scopes` → `variables`. See `python/basic` (single frame) and `python/frames` (call stack).
 

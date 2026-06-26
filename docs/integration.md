@@ -77,7 +77,7 @@ dbg.on('event', (msg) => {
 
 ### Initialization Sequence
 
-Order matches the DAP test harness (`tools/dap/run.ts` + `tools/dap/tests/lang/adapters/c-cpp/engine.ts`):
+Order matches the DAP test harness (`tools/dap/run.ts` + `tools/dap/tests/adapters/c-cpp/engine.ts`):
 
 1. **Client** registers `dbg.on('event', …)` for `initialized`, `stopped`, and `terminated`.
 2. **Client** starts **`engine.run()`** without awaiting it yet — the worker compiles (C) or boots the debug bridge (Python) and then **blocks** until step **9**.

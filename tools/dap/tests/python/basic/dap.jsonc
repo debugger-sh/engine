@@ -27,7 +27,8 @@
       "body": {
         "reason": "breakpoint",
         "threadId": "${{thread}}"
-      }
+      },
+      "$timeout": 30000
     },
     {
       "type": "request",

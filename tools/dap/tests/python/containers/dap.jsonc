@@ -4,15 +4,15 @@
       "type": "request",
       "command": "setBreakpoints",
       "arguments": {
-        "source": { "path": "/main.py" },
-        "breakpoints": [{ "line": 10 }]
+        "source": { "path": "main.py" },
+        "breakpoints": [{ "line": 12 }]
       }
     },
     {
       "type": "response",
       "body": {
         "breakpoints": {
-          "$array.contains": [{ "line": 10, "verified": true }]
+          "$array.contains": [{ "line": 12, "verified": true }]
         }
       }
     },
@@ -39,14 +39,14 @@
       "type": "response",
       "body": {
         "stackFrames": {
-          "$array.contains": [{ "name": "__main__", "id": "${{mainFrame}}" }]
+          "$array.contains": [{ "name": "main", "id": "${{frame}}" }]
         }
       }
     },
     {
       "type": "request",
       "command": "scopes",
-      "arguments": { "frameId": "{{mainFrame}}" }
+      "arguments": { "frameId": "{{frame}}" }
     },
     {
       "type": "response",
@@ -102,23 +102,6 @@
       "type": "request",
       "command": "variables",
       "arguments": {
-        "variablesReference": "{{items}}"
-      }
-    },
-    {
-      "type": "response",
-      "body": {
-        "variables": [
-          { "name": "[0]", "value": "10", "variablesReference": 0 },
-          { "name": "[1]", "value": "20", "variablesReference": 0 },
-          { "name": "[2]", "value": "30", "variablesReference": 0 }
-        ]
-      }
-    },
-    {
-      "type": "request",
-      "command": "variables",
-      "arguments": {
         "variablesReference": "{{users}}"
       }
     },
@@ -149,6 +132,23 @@
             { "name": "name", "value": "'alice'", "variablesReference": 0 }
           ]
         }
+      }
+    },
+    {
+      "type": "request",
+      "command": "variables",
+      "arguments": {
+        "variablesReference": "{{items}}"
+      }
+    },
+    {
+      "type": "response",
+      "body": {
+        "variables": [
+          { "name": "[0]", "value": "10", "variablesReference": 0 },
+          { "name": "[1]", "value": "20", "variablesReference": 0 },
+          { "name": "[2]", "value": "30", "variablesReference": 0 }
+        ]
       }
     },
     {

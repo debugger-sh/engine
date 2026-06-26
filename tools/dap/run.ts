@@ -8,10 +8,10 @@ import { fileURLToPath } from 'node:url';
 import stripJsonComments from 'strip-json-comments';
 
 import { CaptureMap, executeSnippet, match, MatchResult, substitutePlaceholders } from './matcher';
-import { createEngineBackend } from './tests/lang/adapters/c-cpp/engine.ts';
-import { createLldbBackend } from './tests/lang/adapters/c-cpp/lldb.ts';
-import { createDebugpyBackend } from './tests/lang/adapters/python/debugpy.ts';
-import type { Backend, BackendOptions, Json } from './tests/lang/adapters/types.ts';
+import { createEngineBackend } from './tests/adapters/c-cpp/engine.ts';
+import { createLldbBackend } from './tests/adapters/c-cpp/lldb.ts';
+import { createDebugpyBackend } from './tests/adapters/python/debugpy.ts';
+import type { Backend, BackendOptions, Json } from './tests/adapters/types.ts';
 
 export type { Backend, BackendOptions, Json };
 
@@ -78,6 +78,7 @@ const COMMON_INIT_STEPS: Step[] = [
 type CliOpts = {
   tests: string[];
   lldb: boolean;
+  debugpy: boolean;
 };
 
 const SKIP_TEST_DIRS = new Set(['adapters', 'backend']);
@@ -101,17 +102,20 @@ function die(msg: string): never {
 
 function parseCli(argv: string[]): CliOpts {
   let lldb = false;
+  let debugpy = false;
   const tests: string[] = [];
   for (const arg of argv) {
     if (arg === '--lldb') {
       lldb = true;
+    } else if (arg === '--debugpy') {
+      debugpy = true;
     } else if (arg.startsWith('--')) {
       die(`unknown flag: ${arg}`);
     } else {
       tests.push(arg);
     }
   }
-  return { tests, lldb };
+  return { tests, lldb, debugpy };
 }
 
 async function ensureEngineLinked() {
@@ -288,8 +292,11 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
 
   const fsNode = await collectFsNode(testDir);
   const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode };
-  const backend = testName.startsWith('python/')
-    ? await createDebugpyBackend(backendOpts)
+  const isPython = testName.startsWith('python/');
+  const backend = isPython
+    ? opts.debugpy
+      ? await createDebugpyBackend(backendOpts)
+      : await createEngineBackend(backendOpts)
     : opts.lldb
       ? await createLldbBackend(backendOpts)
       : await createEngineBackend(backendOpts);
@@ -402,8 +409,10 @@ async function main() {
   if (available.length === 0) die(`no tests found in ${TESTS_DIR}`);
   const tests = opts.tests.length ? expandTestSelection(opts.tests, available) : available;
 
-  const hasPython = tests.some((t) => t.startsWith('python/'));
-  const hasEngine = tests.some((t) => !t.startsWith('python/') && !opts.lldb);
+  const cppTests = tests.filter((t) => !t.startsWith('python/'));
+  const pythonTests = tests.filter((t) => t.startsWith('python/'));
+  const hasEngine =
+    (cppTests.length > 0 && !opts.lldb) || (pythonTests.length > 0 && !opts.debugpy);
 
   if (hasEngine) {
     await waitForDevBuild();
@@ -411,8 +420,10 @@ async function main() {
       die(`missing dist/debugger-sh.js. Run 'npm run build' first.`);
     await ensureEngineLinked();
   }
-  if (opts.lldb) logInfo(`${chalk.bold('--lldb')}: running against ${chalk.bold('lldb-dap')}`);
-  if (hasPython) logInfo(`${chalk.bold('python')}: running against ${chalk.bold('debugpy')}`);
+  if (opts.lldb)
+    logInfo(`${chalk.bold('--lldb')}: running C/C++ against ${chalk.bold('lldb-dap')}`);
+  if (opts.debugpy && pythonTests.length)
+    logInfo(`${chalk.bold('--debugpy')}: running Python against ${chalk.bold('debugpy')}`);
 
   const failed: { name: string; error: string }[] = [];
 
