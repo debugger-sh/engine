@@ -21,15 +21,6 @@ export type RunResult = CompletedResult | StoppedResult | ErrorResult;
 export type FsNode = string | DirNode;
 export type DirNode = { [name: string]: FsNode };
 
-let initPromise: Promise<void> | undefined;
-
-export async function prefetch(lang: Lang): Promise<void> {
-  if (typeof fetch === 'undefined') return;
-  initPromise ??= init({ module_or_path: wasmBinary }).then(() => undefined);
-  await initPromise;
-  await Promise.all(prefetch_urls(lang).map((url) => fetch(url, { cache: 'force-cache' })));
-}
-
 export class Engine {
   public readonly stdout = new Stdout(1);
   public readonly stderr = new Stdout(2);
@@ -56,7 +47,9 @@ export class Engine {
   public fs: DirNode = {};
 
   static async create(lang: Lang): Promise<Engine> {
-    await prefetch(lang);
+    await init({ module_or_path: wasmBinary });
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
+      for (const url of prefetch_urls(lang)) void fetch(url, { cache: 'force-cache' });
     return new Engine(lang);
   }
 
