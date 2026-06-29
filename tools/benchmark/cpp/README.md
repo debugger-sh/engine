@@ -77,9 +77,45 @@ export BENCH_SYSROOT=/tmp/sysroot      # verify-toolchain.sh smoke-tests with th
   -x c++ -std=c++23 -O0 -o out.o in.cpp
 ```
 
+## Program-runtime benchmark
+
+The setup above isolates **compiler throughput** (native clang vs wasm clang). A
+second, stronger question is **program runtime**: does running a compiled program
+_in the engine_ (as wasm, under wasmer) add overhead vs running it as a native
+binary? To answer that fairly the two program binaries must come from the _same_
+optimizer — only the target ISA may differ:
+
+- **wasm side** — the `build-native-clang.sh` toolchain (`.build`), which targets
+  `wasm32-wasip1`. Run the output under `wasmer` (the engine's runtime, see
+  `Cargo.toml`).
+- **native side** — `build-host-clang.sh` (`.build-host`): the _same_ pinned LLVM
+  source and build flags, retargeted to the host arch (e.g. `arm64-apple-darwin`).
+  Reuses the source `.build` already fetched.
+
+Both are compiled at the **same `-O`** (default `-O2`), so the only variable is
+wasm-in-engine vs native execution. (Note: the engine itself currently compiles
+user code at `-O0` — `src/worker/mod.rs`. For "real engine output" numbers run
+with `BENCH_OPT=O0` on both sides; for a clean execution-overhead measurement keep
+them optimized.)
+
+```sh
+BENCH_LTO=full ./build-host-clang.sh         # same compiler, host-targeting
+BENCH_WASI_SYSROOT=/tmp/sysroot \
+  ./run-benchmark.sh benchmarks/xorshift.cpp # compile both ways, time, print ratio
+```
+
+`run-benchmark.sh` checks both builds produce identical stdout, then reports
+native vs wasm min/avg wall-clock and the `wasm/native` ratio. Of the matched
+build flags, only the **LLVM version + `-O` level** affect generated code;
+`MinSizeRel`/assertions/threads/LTO only change how clang itself runs, so they're
+kept identical for faithfulness but don't influence the result.
+
 ## Files
 
 - `versions.env` — all pins (source of truth).
-- `build-native-clang.sh` — reproducible native build.
+- `build-native-clang.sh` — reproducible native build (wasm-targeting; compiler baseline).
+- `build-host-clang.sh` — same compiler retargeted to the host arch (runtime-benchmark native side).
+- `run-benchmark.sh` — compile a program both ways, time, report wasm/native ratio.
 - `verify-toolchain.sh` — checks native build matches the in-browser binary.
+- `benchmarks/` — sample programs for `run-benchmark.sh`.
 - `reference/` — YoWASP's `build.sh` and version helper, vendored verbatim.

@@ -1,2 +1,5 @@
-.build/
+.build*/
+.pw-cache/
 *.o
+*.wasm
+*.bench.bin
