@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# Build a NATIVE clang/lld from the exact source YoWASP's in-browser binary was
-# built from, with the same compiler-behavior flags. The only intended difference
-# vs the in-browser toolchain is that this compiler runs as native machine code
-# instead of wasm-under-the-browser — which is precisely the variable the paper
-# isolates. See README.md for the full rationale and the flag-by-flag mapping.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
