@@ -11,7 +11,7 @@ pub(crate) mod execution;
 mod io;
 mod runtime;
 
-use execution::Execution;
+use execution::{Execution, fetch_bytes};
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Helpers                                                                  │
@@ -113,6 +113,8 @@ async fn start_cpp(msg: WorkerStart) {
         .expect("created user files filesystem");
 
     let exec = Execution::new(msg.stdin_buffer);
+    let llvm = fetch_bytes(CPP_WASM_URL).await.expect("toolchain");
+    exec.write_bytes("/llvm.core.wasm", &llvm).await.expect("toolchain");
 
     // One `-cc1` call per source: it emits a single `-o` per invocation.
     let mut obj_paths: Vec<String> = Vec::with_capacity(sources.len());
@@ -159,7 +161,7 @@ async fn start_cpp(msg: WorkerStart) {
         let mut step = exec
             .step("clang")
             // from @yowasp
-            .binary(CPP_WASM_URL)
+            .binary("/llvm.core.wasm")
             .args(&clang_args);
         if let Some(fs) = union_fs.take() {
             step = step
@@ -198,7 +200,7 @@ async fn start_cpp(msg: WorkerStart) {
 
     let exit = exec
         .step("wasm-ld")
-        .binary(CPP_WASM_URL)
+        .binary("/llvm.core.wasm")
         .args(&link_args)
         .run()
         .await

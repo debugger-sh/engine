@@ -75,6 +75,7 @@ impl Execution {
         let mut file = self
             .fs
             .new_open_options()
+            .create(true)
             .write(true)
             .truncate(true)
             .open(path)?;
