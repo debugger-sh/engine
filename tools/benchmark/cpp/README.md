@@ -1,6 +1,6 @@
-# tools/benchmark
+# tools/benchmark/cpp
 
-Contains everything needed for a reproducible toolchain for benchmarking the in-browser engine against a native baseline. This directory currently sets up the **native compiler baseline**: a
+Contains everything needed for a reproducible toolchain for benchmarking the in-browser engine against a native baseline, for **C/C++ programs**. This directory currently sets up the **native compiler baseline**: a
 clang/lld built from the _exact same source and compiler-behavior flags_ as the
 WebAssembly compiler the engine runs (`src/worker/mod.rs`), but compiled to run on any native host.
 
