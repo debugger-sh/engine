@@ -9,8 +9,18 @@ import RustWorker from './worker?worker&inline';
 
 export type Lang = 'c' | 'python';
 
+/** Wall-clock timing for a run, in milliseconds. */
+export type Timing = {
+  /** Host time including worker startup and teardown. */
+  totalMs: number;
+  /** Worker time fetching, compiling, and linking before execution. */
+  buildMs: number;
+  /** Worker time for the user program execution step only. */
+  runMs: number;
+};
+
 /** The engine ran to completion with the provided `exitCode`. */
-export type CompletedResult = { type: 'completed'; exitCode: number };
+export type CompletedResult = { type: 'completed'; exitCode: number; timing: Timing };
 /** The engine was stopped by calling `stop`. */
 export type StoppedResult = { type: 'stopped' };
 /** The engine had an error. This is an error with the engine itself, and not the user's code. */
@@ -65,15 +75,23 @@ export class Engine {
     this.rejector?.();
   }
 
+  /**
+   * Runs the program. {@link CompletedResult} carries build/run timing: `timing.runMs`
+   * is the isolated user-program execution step, `timing.buildMs` covers toolchain fetch,
+   * compile, and link, and `timing.totalMs` adds host-side worker startup and teardown.
+   */
   public async run(): Promise<RunResult> {
     if (this.promise) return this.promise;
     this.promise = this.execute();
-    const result = await this.promise;
-    this.promise = undefined;
-    return result;
+    try {
+      return await this.promise;
+    } finally {
+      this.promise = undefined;
+    }
   }
 
   private async execute(): Promise<RunResult> {
+    const totalStart = performance.now();
     const worker = new RustWorker();
 
     /* Set up handling for stdout/stderr */
@@ -101,7 +119,15 @@ export class Engine {
 
         worker.addEventListener('message', (message: MessageEvent<WorkerOut>) => {
           if (message.data.type === 'stop')
-            resolve({ type: 'completed', exitCode: message.data.exit_code });
+            resolve({
+              type: 'completed',
+              exitCode: message.data.exit_code,
+              timing: {
+                totalMs: performance.now() - totalStart,
+                buildMs: message.data.build_ms,
+                runMs: message.data.run_ms
+              }
+            });
           else if (message.data.type === 'error')
             resolve({
               type: 'error',

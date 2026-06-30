@@ -1,4 +1,5 @@
 use console_error_panic_hook;
+use instant::Instant;
 use std::path::PathBuf;
 use wasm_bindgen::prelude::*;
 use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, create_dir_all, mem_fs};
@@ -91,6 +92,17 @@ fn collect_dir_sources(
 pub(crate) const CPP_WASM_URL: &str = "https://fabioibanez.github.io/website/llvm.core.wasm";
 pub(crate) const CPP_STDLIB_URL: &str = "https://fabioibanez.github.io/website/llvm-resources.tar.gz";
 
+/// Builds a `Stop` with build/run timing. `run_start` is `None` when execution never
+/// began (e.g. a compile error), in which case the elapsed time is all build.
+pub(crate) fn stop(exit_code: i32, build_start: Instant, run_start: Option<Instant>) -> WorkerOut<'static> {
+    let ms = |d: instant::Duration| d.as_secs_f64() * 1000.0;
+    let (build_ms, run_ms) = match run_start {
+        Some(run) => (ms(run - build_start), ms(run.elapsed())),
+        None => (ms(build_start.elapsed()), 0.0),
+    };
+    WorkerOut::Stop { exit_code, build_ms, run_ms }
+}
+
 async fn start(msg: WorkerStart) {
     match msg.lang {
         Lang::C => start_cpp(msg).await,
@@ -99,6 +111,7 @@ async fn start(msg: WorkerStart) {
 }
 
 async fn start_cpp(msg: WorkerStart) {
+    let build_start = Instant::now();
     let mut sources = Vec::new();
     collect_dir_sources(&msg.fs, &PathBuf::from("/"), &mut sources);
     sources.sort();
@@ -171,10 +184,7 @@ async fn start_cpp(msg: WorkerStart) {
         let exit = step.run().await.expect("Compilation succeeded");
 
         if !exit.is_success() {
-            return WorkerOut::Stop {
-                exit_code: exit.raw(),
-            }
-            .send();
+            return stop(exit.raw(), build_start, None).send();
         }
         obj_paths.push(obj_path);
     }
@@ -207,12 +217,10 @@ async fn start_cpp(msg: WorkerStart) {
         .expect("Linking succeeded");
 
     if !exit.is_success() {
-        return WorkerOut::Stop {
-            exit_code: exit.raw(),
-        }
-        .send();
+        return stop(exit.raw(), build_start, None).send();
     }
 
+    let run_start = Instant::now();
     let exit = exec
         .step("main")
         .binary("/main.wasm")
@@ -221,10 +229,7 @@ async fn start_cpp(msg: WorkerStart) {
         .await
         .expect("Running succeeded");
 
-    WorkerOut::Stop {
-        exit_code: exit.raw(),
-    }
-    .send();
+    stop(exit.raw(), build_start, Some(run_start)).send();
 }
 
 #[wasm_bindgen]
