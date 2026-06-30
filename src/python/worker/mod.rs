@@ -1,9 +1,11 @@
 mod debuggee;
 
+use instant::Instant;
 use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, mem_fs};
 
 use crate::types::{FsNode, WorkerOut, WorkerStart};
 use crate::worker::execution::Execution;
+use crate::worker::stop;
 
 use debuggee::PythonDebuggee;
 
@@ -27,13 +29,14 @@ pub async fn start(msg: WorkerStart) {
     // Report setup/runtime failures as a clean error instead of panicking, so the
     // host shows a message rather than a Rust backtrace. A non-zero exit code is
     // the program's own result, not an error.
-    match run(msg).await {
-        Ok(exit_code) => WorkerOut::Stop { exit_code }.send(),
+    let build_start = Instant::now();
+    match run(msg, build_start).await {
+        Ok(stop) => stop.send(),
         Err(message) => WorkerOut::Error { message }.send(),
     }
 }
 
-async fn run(msg: WorkerStart) -> Result<i32, String> {
+async fn run(msg: WorkerStart, build_start: Instant) -> Result<WorkerOut<'static>, String> {
     let fs = crate::worker::create_user_fs(FsNode::Dir(msg.fs))
         .await
         .map_err(|e| format!("Failed to prepare the filesystem: {e}"))?;
@@ -60,9 +63,10 @@ async fn run(msg: WorkerStart) -> Result<i32, String> {
         step = step.device_file("/__debug__", Box::new(debuggee.debug_file()));
     }
 
+    let run_start = Instant::now();
     let exit = step
         .run()
         .await
         .map_err(|e| format!("Failed to run Python (could not load the runtime?): {e}"))?;
-    Ok(exit.raw())
+    Ok(stop(exit.raw(), build_start, Some(run_start)))
 }
