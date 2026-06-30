@@ -21,7 +21,7 @@ YoWASP's own recipe is vendored verbatim in [`reference/`](./reference/).
 ## Same compiler, host target
 
 `build-host-clang.sh` keeps every flag that affects compiler behavior or speed
-identical to the engine's wasm compiler — only the target arch differs:
+identical to the engine's wasm compiler.
 
 **Matched (must stay identical for fairness):**
 
@@ -29,10 +29,7 @@ identical to the engine's wasm compiler — only the target arch differs:
 - `LLVM_ENABLE_ASSERTIONS=ON`
 - `LLVM_ENABLE_THREADS=OFF`
 - `LLVM_ENABLE_PROJECTS="clang;lld"`
-- **LTO** — on by default (`BENCH_LTO=thin`). LTO makes clang's own code faster, so
-  matching it keeps codegen quality consistent with the engine's compiler. `BENCH_LTO=full`
-  matches YoWASP exactly but full-LTO linking clang can exceed 32GB RAM and OOM;
-  `BENCH_LTO=off` disables it (not recommended).
+- **Full LTO** — matches YoWASP's `-flto` exactly
 
 **Differs:** `LLVM_TARGETS_TO_BUILD` / `LLVM_DEFAULT_TARGET_TRIPLE` are set to the host
 arch (e.g. `AArch64` / `arm64-apple-darwin`) so the toolchain emits native binaries.
@@ -40,7 +37,7 @@ arch (e.g. `AArch64` / `arm64-apple-darwin`) so the toolchain emits native binar
 ## Usage
 
 ```sh
-BENCH_LTO=full ./build-host-clang.sh           # clone @ pinned commit, build host toolchain
+./build-host-clang.sh                          # clone @ pinned commit, build host toolchain
 ./run-benchmark.sh benchmarks/xorshift.cpp     # compile + time the native binary
 ```
 
@@ -48,12 +45,10 @@ BENCH_LTO=full ./build-host-clang.sh           # clone @ pinned commit, build ho
 if present) and lands the toolchain in `.build-host/install/bin`.
 
 `run-benchmark.sh` compiles the program with the host clang and reports min/avg
-wall-clock over `BENCH_ITERS` runs (1 warmup). Of the matched build flags, only the
-**LLVM version + `-O` level** affect generated code; `MinSizeRel`/assertions/threads/LTO
-only change how clang itself runs, so they're kept identical for faithfulness but don't
-influence the result.
+wall-clock over `BENCH_ITERS` runs (1 warmup).
 
-Env: `BENCH_ITERS=5`, `BENCH_OPT=O2`, `BENCH_STD=c++23`, `BENCH_HOST_BIN`.
+Env: `BENCH_ITERS=5`, `BENCH_OPT=O2`, `BENCH_STD=c++23`, `BENCH_HOST_BIN`. `BENCH_JOBS`
+and `BENCH_HOST_BUILD_DIR` tune the build.
 
 ## Files
 

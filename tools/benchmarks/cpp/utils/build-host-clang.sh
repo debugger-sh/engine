@@ -44,18 +44,13 @@ GOT="$(git -C "$SRC_DIR" rev-parse HEAD)"
 echo ">> source at $GOT ($SRC_DIR)"
 
 # Same compiler-behavior flags as the engine's wasm compiler (MinSizeRel, assertions,
-# threads off, projects, LTO). ONLY the target differs: host arch instead of WebAssembly.
-case "${BENCH_LTO:-thin}" in
-  thin) LTO_ARGS=(-DLLVM_ENABLE_LTO=Thin) ;;
-  full) LTO_ARGS=(-DLLVM_ENABLE_LTO=Full) ;;
-  off)  LTO_ARGS=() ;;
-  *) echo "BENCH_LTO must be one of: thin|full|off" >&2; exit 1 ;;
-esac
-
+# threads off, projects, full LTO to match YoWASP's `-flto`). ONLY the target differs:
+# host arch instead of WebAssembly.
 cmake -G Ninja -B "$CFG_DIR" -S "$SRC_DIR/llvm" \
   -DCMAKE_BUILD_TYPE=MinSizeRel \
   -DLLVM_ENABLE_ASSERTIONS=ON \
   -DLLVM_ENABLE_THREADS=OFF \
+  -DLLVM_ENABLE_LTO=Full \
   -DLLVM_TARGETS_TO_BUILD="$HOST_LLVM_TARGET" \
   -DLLVM_DEFAULT_TARGET_TRIPLE="$HOST_TRIPLE" \
   -DLLVM_ENABLE_PROJECTS="clang;lld" \
@@ -67,8 +62,7 @@ cmake -G Ninja -B "$CFG_DIR" -S "$SRC_DIR/llvm" \
   -DCLANG_INCLUDE_TESTS=OFF \
   -DCLANG_INCLUDE_DOCS=OFF \
   -DCLANG_LINKS_TO_CREATE="clang;clang++" \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  "${LTO_ARGS[@]}"
+  -DCMAKE_INSTALL_PREFIX="$PREFIX"
 
 cmake --build "$CFG_DIR" -j "$JOBS" \
   --target clang clang-resource-headers lld llvm-dwarfdump
