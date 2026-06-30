@@ -9,7 +9,7 @@ CFG_DIR="$BUILD_DIR/llvm-build"
 PREFIX="$BUILD_DIR/install"
 JOBS="${BENCH_JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc)}"
 
-# Reuse the source the wasm build already fetched; otherwise fetch our own.
+# Reuse a previously fetched LLVM source tree if present; otherwise fetch our own.
 SHARED_SRC="$HERE/.build/llvm-src"
 SRC_DIR="$BUILD_DIR/llvm-src"
 [ -e "$SHARED_SRC/llvm/CMakeLists.txt" ] && SRC_DIR="$SHARED_SRC"
@@ -43,8 +43,8 @@ GOT="$(git -C "$SRC_DIR" rev-parse HEAD)"
 [ "$GOT" = "$LLVM_COMMIT" ] || { echo "commit mismatch: got $GOT want $LLVM_COMMIT" >&2; exit 1; }
 echo ">> source at $GOT ($SRC_DIR)"
 
-# Same compiler-behavior flags as the wasm build (MinSizeRel, assertions, threads
-# off, projects, LTO). ONLY the target differs: host arch instead of WebAssembly.
+# Same compiler-behavior flags as the engine's wasm compiler (MinSizeRel, assertions,
+# threads off, projects, LTO). ONLY the target differs: host arch instead of WebAssembly.
 case "${BENCH_LTO:-thin}" in
   thin) LTO_ARGS=(-DLLVM_ENABLE_LTO=Thin) ;;
   full) LTO_ARGS=(-DLLVM_ENABLE_LTO=Full) ;;
