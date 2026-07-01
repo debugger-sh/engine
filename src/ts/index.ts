@@ -7,10 +7,20 @@ import { Debugger } from './debugger';
 import { errorResult, Internals } from './util';
 import RustWorker from './worker?worker&inline';
 
-export type Lang = 'c' | 'python';
+export type Lang = 'c' | 'python' | 'rust';
+
+/** Wall-clock timing for a run, in milliseconds. */
+export type Timing = {
+  /** Host time including worker startup and teardown. */
+  totalMs: number;
+  /** Worker time fetching, compiling, and linking before execution. */
+  buildMs: number;
+  /** Worker time for the user program execution step only. */
+  runMs: number;
+};
 
 /** The engine ran to completion with the provided `exitCode`. */
-export type CompletedResult = { type: 'completed'; exitCode: number };
+export type CompletedResult = { type: 'completed'; exitCode: number; timing: Timing };
 /** The engine was stopped by calling `stop`. */
 export type StoppedResult = { type: 'stopped' };
 /** The engine had an error. This is an error with the engine itself, and not the user's code. */
@@ -20,21 +30,6 @@ export type RunResult = CompletedResult | StoppedResult | ErrorResult;
 
 export type FsNode = string | DirNode;
 export type DirNode = { [name: string]: FsNode };
-
-let initPromise: Promise<void> | undefined;
-
-async function ensureInit(): Promise<void> {
-  if (typeof window === 'undefined') return;
-  initPromise ??= init({ module_or_path: wasmBinary }).then(() => undefined);
-  await initPromise;
-}
-
-/** Warm the browser cache for a language's toolchain assets. */
-export async function prefetch(lang: Lang): Promise<void> {
-  if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
-  await ensureInit();
-  await Promise.all(prefetch_urls(lang).map((url) => fetch(url, { cache: 'force-cache' })));
-}
 
 export class Engine {
   public readonly stdout = new Stdout(1);
@@ -62,8 +57,9 @@ export class Engine {
   public fs: DirNode = {};
 
   static async create(lang: Lang): Promise<Engine> {
-    await ensureInit();
-    await prefetch(lang);
+    await init({ module_or_path: wasmBinary });
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
+      for (const url of prefetch_urls(lang)) void fetch(url, { cache: 'force-cache' });
     return new Engine(lang);
   }
 
@@ -79,15 +75,23 @@ export class Engine {
     this.rejector?.();
   }
 
+  /**
+   * Runs the program. {@link CompletedResult} carries build/run timing: `timing.runMs`
+   * is the isolated user-program execution step, `timing.buildMs` covers toolchain fetch,
+   * compile, and link, and `timing.totalMs` adds host-side worker startup and teardown.
+   */
   public async run(): Promise<RunResult> {
     if (this.promise) return this.promise;
     this.promise = this.execute();
-    const result = await this.promise;
-    this.promise = undefined;
-    return result;
+    try {
+      return await this.promise;
+    } finally {
+      this.promise = undefined;
+    }
   }
 
   private async execute(): Promise<RunResult> {
+    const totalStart = performance.now();
     const worker = new RustWorker();
 
     /* Set up handling for stdout/stderr */
@@ -115,7 +119,15 @@ export class Engine {
 
         worker.addEventListener('message', (message: MessageEvent<WorkerOut>) => {
           if (message.data.type === 'stop')
-            resolve({ type: 'completed', exitCode: message.data.exit_code });
+            resolve({
+              type: 'completed',
+              exitCode: message.data.exit_code,
+              timing: {
+                totalMs: performance.now() - totalStart,
+                buildMs: message.data.build_ms,
+                runMs: message.data.run_ms
+              }
+            });
           else if (message.data.type === 'error')
             resolve({
               type: 'error',
@@ -125,9 +137,9 @@ export class Engine {
 
         const message: WorkerStart = {
           fs: this.fs,
+          lang: this.lang,
           stdin_buffer: this.stdin[Internals].buffer,
-          is_debug: this.debugger.enabled,
-          lang: this.lang
+          is_debug: this.debugger.enabled
         };
         worker.postMessage(message);
       });

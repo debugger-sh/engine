@@ -103,6 +103,7 @@ pub enum FsNode {
 pub enum Lang {
     C,
     Python,
+    Rust,
 }
 
 #[derive(Debug, Tsify, Deserialize)]
@@ -165,7 +166,13 @@ pub enum WorkerOut<'a> {
         frame: Option<String>,
     },
     #[serde(rename = "stop")]
-    Stop { exit_code: i32 },
+    Stop {
+        exit_code: i32,
+        /// Wall time in the worker from job start until the run step begins.
+        build_ms: f64,
+        /// Wall time in the worker for the final run step only.
+        run_ms: f64,
+    },
 
     /// A setup/runtime failure in the engine itself (e.g. the language runtime
     /// failed to load) — distinct from the user's program exiting non-zero.
