@@ -1,0 +1,11 @@
+{
+  "name": "@debugger-sh/benchmarks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bench": "npm install --silent && npx -y bun run.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14"
+  }
+}
