@@ -34,26 +34,50 @@ identical to the engine's wasm compiler.
 **Differs:** `LLVM_TARGETS_TO_BUILD` / `LLVM_DEFAULT_TARGET_TRIPLE` are set to the host
 arch (e.g. `AArch64` / `arm64-apple-darwin`) so the toolchain emits native binaries.
 
-## Usage
+## Build the native toolchain
 
 ```sh
-./build-host-clang.sh                          # clone @ pinned commit, build host toolchain
-./run-benchmark.sh benchmarks/xorshift.cpp     # compile + time the native binary
+./utils/build-host-clang.sh                    # clone @ pinned commit, build host toolchain
 ```
 
 `build-host-clang.sh` fetches the pinned LLVM source itself (reusing `.build/llvm-src`
-if present) and lands the toolchain in `.build-host/install/bin`.
+if present) and lands the toolchain in `utils/.build-host/install/bin`.
 
-`run-benchmark.sh` compiles the program with the host clang and reports min/avg
-wall-clock over `BENCH_ITERS` runs (1 warmup).
+## Compare engine vs native
 
-Env: `BENCH_ITERS=5`, `BENCH_OPT=O2`, `BENCH_STD=c++23`, `BENCH_HOST_BIN`. `BENCH_JOBS`
-and `BENCH_HOST_BUILD_DIR` tune the build.
+`compare.ts` times the same program both ways and prints the ratio: the native baseline
+(via `run-benchmark.sh`) and the engine's isolated execution (`Engine.run({ profile: true })`,
+reading `timing.runMs`). Build the engine library first (`npm run build` at the repo root).
+
+```sh
+npm run compare -- benchmarks/loop.cpp
+```
+
+```
+== loop.cpp  (-O0, 5 iters) ==
+  native  min   185.669 ms   avg   185.823 ms
+  engine  min   163.171 ms   avg   163.567 ms   (runMs, isolated execution)
+  ratio engine/native:  min 0.88x   avg 0.88x
+```
+
+Defaults to `-O0` because **the engine compiles user code at `-O0`** (`src/worker/mod.rs`);
+that keeps it apples-to-apples. The engine spawns a fresh worker per run (re-fetching the
+toolchain), so wall-clock is slow, but `runMs` measures only the program execution step.
+
+You can also time the native side alone:
+
+```sh
+./utils/run-benchmark.sh benchmarks/loop.cpp   # compile + time the native binary
+```
+
+Env: `BENCH_ITERS=5`, `BENCH_OPT=O0`, `BENCH_STD=c++23`. `BENCH_JOBS` /
+`BENCH_HOST_BUILD_DIR` tune the build.
 
 ## Files
 
-- `versions.env` — all pins (source of truth).
-- `build-host-clang.sh` — reproducible host-targeting native build.
-- `run-benchmark.sh` — compile a program with the host clang, time it, report min/avg.
-- `benchmarks/` — sample programs for `run-benchmark.sh`.
+- `versions.env` — LLVM source/commit pins (source of truth).
+- `utils/build-host-clang.sh` — reproducible host-targeting native build.
+- `utils/run-benchmark.sh` — compile a program with the host clang, time it, report min/avg.
+- `compare.ts` — run a program through both the native binary and the engine, report the ratio.
+- `benchmarks/` — sample programs.
 - `reference/` — YoWASP's `build.sh` and version helper, vendored verbatim.

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$HERE/versions.env"
+source "$HERE/../versions.env"
 
 BUILD_DIR="${BENCH_HOST_BUILD_DIR:-$HERE/.build-host}"
 CFG_DIR="$BUILD_DIR/llvm-build"

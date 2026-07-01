@@ -8,7 +8,6 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$HERE/versions.env"
 
 [ $# -ge 1 ] || { echo "usage: $0 <program.(cpp|c)> [-- prog args...]" >&2; exit 1; }
 SRC="$1"; shift
