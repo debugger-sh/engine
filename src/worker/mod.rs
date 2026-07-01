@@ -1,6 +1,6 @@
 use console_error_panic_hook;
 use instant::Instant;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use wasm_bindgen::prelude::*;
 use wasmer_wasix::virtual_fs::{AsyncWriteExt, FileSystem, create_dir_all, mem_fs};
 use web_sys::{DedicatedWorkerGlobalScope, MessageEvent};
@@ -53,21 +53,28 @@ async fn create_user_fs_rec(
     Ok(())
 }
 
-fn collect_sources(node: &FsNode, base_path: &PathBuf, sources: &mut Vec<String>) {
+fn is_source_ext(ext: &str, lang: Lang) -> bool {
+    match lang {
+        Lang::C => matches!(
+            ext.to_ascii_lowercase().as_str(),
+            "c" | "cc" | "cp" | "cpp" | "cxx" | "c++"
+        ),
+        Lang::Rust => ext.eq_ignore_ascii_case("rs"),
+        Lang::Python => false,
+    }
+}
+
+fn collect_sources(node: &FsNode, base_path: &PathBuf, lang: Lang, sources: &mut Vec<String>) {
     match node {
         FsNode::File(_) => {
             if let Some(ext) = base_path.extension().and_then(|ext| ext.to_str()) {
-                let is_source = matches!(
-                    ext.to_ascii_lowercase().as_str(),
-                    "c" | "cc" | "cp" | "cpp" | "cxx" | "c++"
-                );
-                if is_source {
+                if is_source_ext(ext, lang) {
                     sources.push(base_path.to_string_lossy().to_string());
                 }
             }
         }
         FsNode::Dir(children) => {
-            collect_dir_sources(children, base_path, sources);
+            collect_dir_sources(children, base_path, lang, sources);
         }
     }
 }
@@ -75,13 +82,76 @@ fn collect_sources(node: &FsNode, base_path: &PathBuf, sources: &mut Vec<String>
 fn collect_dir_sources(
     children: &std::collections::HashMap<String, FsNode>,
     base_path: &PathBuf,
+    lang: Lang,
     sources: &mut Vec<String>,
 ) {
     for (name, child_node) in children {
         let mut child_path = base_path.clone();
         child_path.push(name);
-        collect_sources(child_node, &child_path, sources);
+        collect_sources(child_node, &child_path, lang, sources);
     }
+}
+
+fn rust_obj_path(source: &str) -> String {
+    format!("{}.o", source.trim_end_matches(".rs"))
+}
+
+fn collect_rust_objs(fs: &mem_fs::FileSystem, source: &str) -> Vec<String> {
+    let obj_path = rust_obj_path(source);
+    let mut objs = vec![obj_path.clone()];
+
+    let path = Path::new(source);
+    let dir = path.parent().unwrap_or(Path::new("/"));
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+
+    let Ok(mut entries) = fs.read_dir(dir) else {
+        return objs;
+    };
+    for entry in entries.by_ref().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(stem) && name.ends_with(".rcgu.o") {
+            objs.push(format!("{}/{}", dir.to_string_lossy(), name));
+        }
+    }
+    objs
+}
+
+fn find_rust_rlibs(fs: &mem_fs::FileSystem) -> Vec<String> {
+    let dir = Path::new("/lib/rustlib/wasm32-wasip1/lib");
+    let mut entries = fs.read_dir(dir).expect("Rust sysroot rlib directory");
+    let names: Vec<String> = entries
+        .by_ref()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+
+    [
+        "libpanic_abort-",
+        "libstd-",
+        "libwasi-",
+        "libcfg_if-",
+        "librustc_demangle-",
+        "libstd_detect-",
+        "libhashbrown-",
+        "librustc_std_workspace_alloc-",
+        "libminiz_oxide-",
+        "libadler2-",
+        "libunwind-",
+        "liblibc-",
+        "librustc_std_workspace_core-",
+        "liballoc-",
+        "libcore-",
+        "libcompiler_builtins-",
+    ]
+    .iter()
+    .map(|prefix| {
+        names
+            .iter()
+            .find(|name| name.starts_with(prefix) && name.ends_with(".rlib"))
+            .map(|name| format!("/lib/rustlib/wasm32-wasip1/lib/{name}"))
+            .unwrap_or_else(|| panic!("missing rlib for prefix {prefix}"))
+    })
+    .collect()
 }
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
@@ -105,20 +175,25 @@ pub(crate) fn stop(exit_code: i32, build_start: Instant, run_start: Option<Insta
 
 async fn start(msg: WorkerStart) {
     match msg.lang {
-        Lang::C => start_cpp(msg).await,
         Lang::Python => crate::python::worker::start(msg).await,
+        Lang::C | Lang::Rust => start_native(msg).await,
     }
 }
 
-async fn start_cpp(msg: WorkerStart) {
+async fn start_native(msg: WorkerStart) {
     let build_start = Instant::now();
     let mut sources = Vec::new();
-    collect_dir_sources(&msg.fs, &PathBuf::from("/"), &mut sources);
+    collect_dir_sources(&msg.fs, &PathBuf::from("/"), msg.lang, &mut sources);
     sources.sort();
 
+    let lang_name = match msg.lang {
+        Lang::C => "C/C++",
+        Lang::Rust => "Rust",
+        Lang::Python => unreachable!(),
+    };
     assert!(
         !sources.is_empty(),
-        "No C/C++ source files found in provided filesystem"
+        "No {lang_name} source files found in provided filesystem"
     );
 
     let fs = create_user_fs(FsNode::Dir(msg.fs))
@@ -126,17 +201,34 @@ async fn start_cpp(msg: WorkerStart) {
         .expect("created user files filesystem");
 
     let exec = Execution::new(msg.stdin_buffer);
-    let llvm = fetch_bytes(CPP_WASM_URL).await.expect("toolchain");
-    exec.write_bytes("/llvm.core.wasm", &llvm).await.expect("toolchain");
+    let is_debug = msg.is_debug;
 
-    // One `-cc1` call per source: it emits a single `-o` per invocation.
+    match msg.lang {
+        Lang::C => {
+            let llvm = fetch_bytes(CPP_WASM_URL).await.expect("toolchain");
+            exec.write_bytes("/llvm.core.wasm", &llvm)
+                .await
+                .expect("toolchain");
+            start_cpp(is_debug, build_start, sources, exec, fs).await;
+        }
+        Lang::Rust => start_rust(is_debug, build_start, sources, exec, fs).await,
+        Lang::Python => unreachable!(),
+    }
+}
+
+async fn start_cpp(
+    is_debug: bool,
+    build_start: Instant,
+    sources: Vec<String>,
+    exec: Execution,
+    fs: mem_fs::FileSystem,
+) {
     let mut obj_paths: Vec<String> = Vec::with_capacity(sources.len());
     let mut union_fs: Option<Box<dyn FileSystem>> = Some(Box::new(fs));
 
     for source in &sources {
         let obj_path = format!("{source}.o");
 
-        // Build clang args, conditional on is_debug
         let mut clang_args = vec![
             "-cc1",
             "-triple",
@@ -162,9 +254,8 @@ async fn start_cpp(msg: WorkerStart) {
             obj_path.as_str(),
         ];
 
-        if msg.is_debug {
+        if is_debug {
             clang_args.push("-O0");
-            // because of the -cc1 flag
             clang_args.push("-debug-info-kind=standalone");
             clang_args.push("-dwarf-version=5");
         }
@@ -173,13 +264,10 @@ async fn start_cpp(msg: WorkerStart) {
 
         let mut step = exec
             .step("clang")
-            // from @yowasp
             .binary("/llvm.core.wasm")
             .args(&clang_args);
         if let Some(fs) = union_fs.take() {
-            step = step
-                .sysroot(CPP_STDLIB_URL)
-                .fs(fs);
+            step = step.sysroot(CPP_STDLIB_URL).fs(fs);
         }
         let exit = step.run().await.expect("Compilation succeeded");
 
@@ -224,7 +312,97 @@ async fn start_cpp(msg: WorkerStart) {
     let exit = exec
         .step("main")
         .binary("/main.wasm")
-        .debug(msg.is_debug)
+        .debug(is_debug)
+        .run()
+        .await
+        .expect("Running succeeded");
+
+    stop(exit.raw(), build_start, Some(run_start)).send();
+}
+
+async fn start_rust(
+    is_debug: bool,
+    build_start: Instant,
+    sources: Vec<String>,
+    exec: Execution,
+    fs: mem_fs::FileSystem,
+) {
+    let mut union_fs: Option<Box<dyn FileSystem>> = Some(Box::new(fs));
+
+    for source in &sources {
+        let obj_path = rust_obj_path(source);
+        let mut rustc_args = vec![
+            source.as_str(),
+            "--sysroot",
+            "/",
+            "--target",
+            "wasm32-wasip1",
+            "-Cpanic=abort",
+            "-Ccodegen-units=1",
+            "-Zthreads=1",
+            "--emit=obj",
+            "-o",
+            obj_path.as_str(),
+        ];
+
+        if is_debug {
+            rustc_args.extend(["-g", "-Copt-level=0"]);
+        }
+
+        let mut step = exec
+            .step("rustc")
+            .binary("https://debugger-sh.github.io/engine/rustc.wasm")
+            .args(&rustc_args);
+        if let Some(fs) = union_fs.take() {
+            step = step
+                .sysroot("https://debugger-sh.github.io/engine/rust-sysroot.tar.gz")
+                .fs(fs);
+        }
+        let exit = step.run().await.expect("Compilation succeeded");
+
+        if !exit.is_success() {
+            return stop(exit.raw(), build_start, None).send();
+        }
+    }
+
+    let mut link_args: Vec<String> = vec![
+        "--export=__main_void".into(),
+        "-z".into(),
+        "stack-size=1048576".into(),
+        "--stack-first".into(),
+        "--no-demangle".into(),
+        "/lib/rustlib/wasm32-wasip1/lib/self-contained/crt1-command.o".into(),
+    ];
+    for source in &sources {
+        link_args.extend(collect_rust_objs(&exec.fs, source));
+    }
+    link_args.extend(find_rust_rlibs(&exec.fs));
+    link_args.extend([
+        "-L/lib/rustlib/wasm32-wasip1/lib/self-contained".into(),
+        "-lc".into(),
+        "-o".into(),
+        "/main.wasm".into(),
+        "--gc-sections".into(),
+        "-O0".into(),
+    ]);
+
+    let exit = exec
+        .step("wasm-ld")
+        .binary("https://fabioibanez.github.io/website/llvm.core.wasm")
+        .args(link_args.iter().map(String::as_str))
+        .run()
+        .await
+        .expect("Linking succeeded");
+
+    if !exit.is_success() {
+        return stop(exit.raw(), build_start, None).send();
+    }
+
+    let run_start = Instant::now();
+    let exit = exec
+        .step("main")
+        .binary("/main.wasm")
+        .debug(is_debug)
         .run()
         .await
         .expect("Running succeeded");
@@ -237,15 +415,12 @@ pub fn main() {
     console_error_panic_hook::set_once();
     let scope = DedicatedWorkerGlobalScope::from(JsValue::from(js_sys::global()));
 
-    // Function that gets called when the worker receives a message
     let onmessage = Closure::wrap(Box::new(move |msg: MessageEvent| {
         let message: WorkerStart = serde_wasm_bindgen::from_value(msg.data()).expect("");
-        // rust-ism: spawn_local is used to run the start function in a new thread
         wasm_bindgen_futures::spawn_local(start(message));
     }) as Box<dyn Fn(MessageEvent)>);
     scope.set_onmessage(Some(onmessage.as_ref().unchecked_ref()));
     onmessage.forget();
 
-    // The worker must send a message to indicate that it's ready to receive messages.
     WorkerOut::Ready.send();
 }

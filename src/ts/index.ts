@@ -7,7 +7,7 @@ import { Debugger } from './debugger';
 import { errorResult, Internals } from './util';
 import RustWorker from './worker?worker&inline';
 
-export type Lang = 'c' | 'python';
+export type Lang = 'c' | 'python' | 'rust';
 
 /** Wall-clock timing for a run, in milliseconds. */
 export type Timing = {
@@ -137,9 +137,9 @@ export class Engine {
 
         const message: WorkerStart = {
           fs: this.fs,
+          lang: this.lang,
           stdin_buffer: this.stdin[Internals].buffer,
-          is_debug: this.debugger.enabled,
-          lang: this.lang
+          is_debug: this.debugger.enabled
         };
         worker.postMessage(message);
       });

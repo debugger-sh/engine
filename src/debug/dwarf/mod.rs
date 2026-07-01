@@ -96,7 +96,12 @@ impl Dwarf {
     pub fn file_at(&self, index: usize) -> &PathBuf {
         self.units
             .iter()
-            .find_map(|u| u.file_at(index))
+            .find_map(|u| {
+                u.file_at({
+                    let local_index = index.checked_sub(u.properties().file_offset)?;
+                    local_index
+                })
+            })
             .expect("Valid file index")
     }
 }

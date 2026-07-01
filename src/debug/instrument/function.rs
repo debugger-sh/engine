@@ -225,10 +225,10 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
         // If the indices of the operands that we need exceed the number of operands we have
         // available, then it will be impossible to recover an operand value
         if first >= height || last >= height {
-            return error!(
-                "Couldn't instrument operands {:?}-{:?} with stack height {:?}",
-                first, last, height
-            );
+            // TODO: How to handle this case? Sometimes, for example in external/linked libraries,
+            // we try to instrument operand values and can't becuase the validator says they don't exist.
+            // Could either just skip, as we do here, or avoid instrumenting external code altogether.
+            return Ok(());
         }
 
         let nlocals = self.validator.len_locals() as usize;
@@ -263,10 +263,11 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
                 .unwrap_or_else(|| {
                     let scratch_idx = self.scratch_locals.len();
                     self.scratch_locals.push(ty);
-                    scratch_indices.insert(scratch_idx);
-                    scratch_map.insert(operand_idx, scratch_idx);
                     scratch_idx
                 });
+
+            scratch_indices.insert(scratch_idx);
+            scratch_map.insert(operand_idx, scratch_idx);
 
             let scratch_idx = (scratch_idx + nlocals) as u32;
 

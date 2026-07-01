@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
@@ -46,6 +47,29 @@ impl<'a> DerefContext<'a> {
     }
 }
 
+pub type DieRange = (CodeOffset, CodeOffset);
+
+#[derive(Debug, Clone)]
+pub struct DieRanges(Vec<DieRange>);
+
+impl DieRanges {
+    pub fn is_empty(&self) -> bool {
+        if self.0.is_empty() {
+            return true;
+        }
+
+        !self.0.iter().any(|(begin, end)| end > begin)
+    }
+
+    pub fn single(&self) -> Option<&DieRange> {
+        if self.0.len() != 1 {
+            return None;
+        }
+
+        self.0.get(0)
+    }
+}
+
 pub struct Die<'a> {
     ctx: DerefContext<'a>,
     die: gimli::DebuggingInformationEntry<R>,
@@ -71,6 +95,17 @@ impl<'a> Die<'a> {
 
     pub fn name(&self) -> Option<String> {
         self.attr_to_string(gimli::DW_AT_name)
+    }
+
+    pub fn decl_file(&self) -> Option<&PathBuf> {
+        let attr = self.attr(gimli::DW_AT_decl_file)?;
+        let index = match attr.value() {
+            gimli::AttributeValue::FileIndex(index) => index as usize,
+            gimli::AttributeValue::Udata(index) => index as usize,
+            _ => return None,
+        };
+
+        self.ctx.unit.file_at(index)
     }
 
     /// Returns the qualified name of this entry which includes

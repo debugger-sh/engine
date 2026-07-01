@@ -40,7 +40,7 @@ export type Step = RequestStep | ResponseStep | EventStep | ExpectStep;
 
 type TestFile = { steps: Step[]; lang?: Lang };
 
-export type Lang = 'c' | 'python';
+export type Lang = 'c' | 'python' | 'rust';
 
 export type BackendOptions = {
   testDir: string;
