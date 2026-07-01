@@ -103,6 +103,7 @@ pub enum FsNode {
 pub enum Lang {
     C,
     Python,
+    Rust,
 }
 
 #[derive(Debug, Tsify, Deserialize)]

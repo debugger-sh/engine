@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct UnitProperties {
     /// The index of this unit among all units in the dwarf output
-    index: usize,
+    pub index: usize,
     /// The index of the first file in this unit in the global locations list
-    file_offset: usize,
+    pub file_offset: usize,
 }
 
 #[derive(Debug)]
@@ -78,6 +78,10 @@ impl Unit {
         &self.unit
     }
 
+    pub fn properties(&self) -> &UnitProperties {
+        &self.properties
+    }
+
     pub fn index(&self) -> usize {
         self.properties.index
     }
@@ -94,8 +98,7 @@ impl Unit {
     }
 
     pub fn file_at(&self, index: usize) -> Option<&PathBuf> {
-        let local_index = index.checked_sub(self.properties.file_offset)?;
-        self.files.get(local_index)
+        self.files.get(index)
     }
 }
 
