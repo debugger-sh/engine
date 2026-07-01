@@ -109,7 +109,6 @@ pub enum Lang {
 #[derive(Debug, Tsify, Deserialize)]
 pub struct WorkerStart {
     pub fs: HashMap<String, FsNode>,
-    pub lang: Lang,
 
     #[serde(with = "serde_wasm_bindgen::preserve")]
     pub stdin_buffer: js_sys::SharedArrayBuffer,
