@@ -93,10 +93,7 @@ impl Dwarf {
     }
 
     /// Gets the path for the file with the given index.
-    pub fn file_at(&self, index: usize) -> &PathBuf {
-        self.units
-            .iter()
-            .find_map(|u| u.file_at(index))
-            .expect("Valid file index")
+    pub fn file_at(&self, index: usize) -> Option<&PathBuf> {
+        self.units.iter().find_map(|u| u.file_at(index))
     }
 }
