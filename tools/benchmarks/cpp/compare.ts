@@ -36,7 +36,7 @@ const native = { min: Number(m[1]), avg: Number(m[2]) };
 
 // --- engine: run N clean executions, collect the isolated runMs ---
 const engine = await Engine.create('c');
-engine.debugger.enabled = false; // debug instrumentation would inflate runMs
+engine.debugger.enabled = true; // debug instrumentation would inflate runMs
 engine.fs = { [basename(src)]: source };
 
 const runMs: number[] = [];
