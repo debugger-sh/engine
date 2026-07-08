@@ -1,22 +1,17 @@
-import { spawn, spawnSync } from 'node:child_process';
-import { createWriteStream, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { cp, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { pipeline } from 'node:stream/promises';
-import { fileURLToPath } from 'node:url';
 
+import { CACHE } from '../../lib/cache.ts';
+import { downloadFile } from '../../lib/download.ts';
+import { LLVM_VERSION } from '../../lib/engine-toolchain.ts';
+import { extractTar } from '../../lib/extract.ts';
+import { shellQuote } from '../../lib/shell.ts';
 import type { BenchmarkPolicy, LocalRun } from '../../policy.ts';
 
-const LLVM_VERSION = '22.1.0';
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const BENCH_ROOT = path.resolve(HERE, '../..');
-const CACHE = path.join(BENCH_ROOT, '.cache');
 const LLVM_CACHE = path.join(CACHE, `llvm-${LLVM_VERSION}`);
 const BUILD_CACHE = path.join(CACHE, 'cpp-build');
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'\\''`)}'`;
-}
 
 function llvmArchiveName(): string {
   const { platform, arch } = process;
@@ -37,17 +32,6 @@ function llvmDownloadUrl(): string {
   return `https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/${llvmArchiveName()}`;
 }
 
-async function run(cmd: string, args: string[]): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: 'ignore' });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`${cmd} exited ${code}`));
-    });
-  });
-}
-
 async function findExtractedRoot(): Promise<string> {
   const entries = await readdir(LLVM_CACHE);
   for (const entry of entries) {
@@ -66,16 +50,15 @@ async function ensureLlvm(): Promise<{ clang: string; clangpp: string }> {
   }
 
   await mkdir(LLVM_CACHE, { recursive: true });
-  const archive = path.join(LLVM_CACHE, llvmArchiveName());
+  const archiveName = llvmArchiveName();
+  const archive = path.join(LLVM_CACHE, archiveName);
   if (!existsSync(archive)) {
-    console.log(`downloading LLVM ${LLVM_VERSION} (${llvmArchiveName()})...`);
-    const res = await fetch(llvmDownloadUrl());
-    if (!res.ok) throw new Error(`LLVM download failed: ${res.status} ${res.statusText}`);
-    await pipeline(res.body!, createWriteStream(archive));
+    console.log(`downloading LLVM ${LLVM_VERSION} (${archiveName})...`);
+    await downloadFile(llvmDownloadUrl(), archive, archiveName);
   }
 
   console.log(`extracting ${archive}...`);
-  await run('tar', ['-xf', archive, '-C', LLVM_CACHE]);
+  await extractTar(archive, LLVM_CACHE, 'xz');
 
   const extracted = await findExtractedRoot();
   await cp(extracted, root, { recursive: true });

@@ -5,6 +5,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import cpp from './languages/cpp/index.ts';
+import python from './languages/python/index.ts';
+import rust from './languages/rust/index.ts';
 import { setDebug } from './lib/log.ts';
 import { type BenchmarkReport, writeReport } from './lib/report.ts';
 import { runLocalPipeline } from './pipelines/local.ts';
@@ -15,7 +17,9 @@ const ROOT = path.resolve(HERE, '../..');
 const OUTPUT_DIR = path.join(HERE, 'output');
 
 const LANGUAGES: Record<string, BenchmarkPolicy> = {
-  cpp
+  cpp,
+  python,
+  rust
 };
 
 type CliOpts = {

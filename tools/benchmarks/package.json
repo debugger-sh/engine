@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bench": "npm install --silent && npx -y bun run.ts"
+    "bench": "npm install --silent && npx -y bun run.ts",
+    "probe": "npm install --silent && npx -y bun probe-toolchains.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.14"
+    "@types/bun": "^1.3.14",
+    "cli-progress": "^3.12.0"
   }
 }
