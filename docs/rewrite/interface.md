@@ -50,8 +50,8 @@ await engine.fs.mount('/' /* Filesystem */);
 We can read files with the following methods:
 
 ```ts
+readFile(path: string, encoding: 'utf8'): Promise<string>;
 readFile(path: string): Promise<Uint8Array>;
-readText(path: string): Promise<string>;      // Read as UTF-8
 ```
 
 Support for additional encodings may be considered later.
@@ -59,14 +59,14 @@ Support for additional encodings may be considered later.
 We can write files using:
 
 ```ts
-write(path: string, contents: string | Uint8Array): Promise<void>;
+writeFile(path: string, contents: string | Uint8Array): Promise<void>;
 ```
 
 For example:
 
 ```ts
 const data = await engine.fs.readFile('/data/res.txt');
-await engine.fs.write('/data/res.copy.txt', data);
+await engine.fs.writeFile('/data/res.copy.txt', data);
 ```
 
 ### Other file operations
@@ -249,6 +249,8 @@ const process = engine.run('cpp');
 process.kill();
 ```
 
+If a process is killed, the resulting exit code will be 130 to mirror the Unix style `SIGTERM` exit code.
+
 ### Process I/O
 
 Each process object provides the `stdin`, `stdout`, and `stderr` objects, which are similar to their existing counterparts. The interface looks like:
@@ -291,4 +293,4 @@ process.debugger.send({ type: 'request', command: 'initialize' /* ... */ });
 
 As is currently the case, the debugger for a compiler-enabled toolchain (e.g. C/C++, Rust) debugs only the execution step in a toolchain (i.e. the user's code). Access to the debugger for a process with `debug: false` will no-op.
 
-If `debug: true` is enabled for a non-toolchain command (e.g. an arbitrary WASI executable), debugging will proceed if the executable had been produced by a compiler toolchain. That is, these executables will be debugged via DWARF inspection and WASM instrumentation. Assume that the provided executable has debug info, i.e. the DWARF exists in the same location in the binary as if it were produced by a compiler/linker toolchain.
+If `debug: true` is enabled for a non-toolchain command (e.g. an arbitrary WASI executable), debugging will proceed as if the executable had been produced by a compiler toolchain. That is, these executables will be debugged via DWARF inspection and WASM instrumentation. Assume that the provided executable has debug info, i.e. the DWARF exists in the same location in the binary as if it were produced by a compiler/linker toolchain.
