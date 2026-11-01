@@ -215,7 +215,7 @@ No special handling is applied to `args`: it is forwarded perfectly to the `pyth
 
 ### Waiting for a process to complete
 
-Processes are then-able objects, so they can be awaited just like a promise and return a `ProcessResult`.
+Processes inherit from `Promise<ProcessResult>`, so they can be awaited just like a promise and return a `ProcessResult`.
 
 ```ts
 const result = await engine.run('cpp');
@@ -257,8 +257,11 @@ Each process object provides the `stdin`, `stdout`, and `stderr` objects, which 
 /**
  * Note that for toolchains which run multiple steps,
  * stdin/stdout/stderr are shared among all steps, as before.
+ *
+ * For example, a single chunk of stdin could be partially eaten by the compiler/linker;
+ * the remaining portion would be passed onto the user program.
  */
-const process = engine.run('cpp', { stdin: true });
+const process = engine.run('cpp');
 console.log(process.stdin.closed); // false
 
 /** Write chunks and close stream */
@@ -288,4 +291,4 @@ process.debugger.send({ type: 'request', command: 'initialize' /* ... */ });
 
 As is currently the case, the debugger for a compiler-enabled toolchain (e.g. C/C++, Rust) debugs only the execution step in a toolchain (i.e. the user's code). Access to the debugger for a process with `debug: false` will no-op.
 
-If `debug: true` is enabled for a non-toolchain command (e.g. an arbitrary WASI executable), debugging will proceed if the executable had been produced by a compiler toolchain. That is, these executables will be debugged via DWARF inspection and WASM instrumentation.
+If `debug: true` is enabled for a non-toolchain command (e.g. an arbitrary WASI executable), debugging will proceed if the executable had been produced by a compiler toolchain. That is, these executables will be debugged via DWARF inspection and WASM instrumentation. Assume that the provided executable has debug info, i.e. the DWARF exists in the same location in the binary as if it were produced by a compiler/linker toolchain.
