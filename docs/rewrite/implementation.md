@@ -40,3 +40,34 @@ OverlayFileSystem::new(
   [sysroot.clone()],   // Sysroot filesystem: /include, /lib, …
 )
 ```
+
+## Toolchain Optimizations
+
+With the engine rewrite, there are a number of important optimizations that should considerably help with the latency of compiling and running code. These optimizations particularly apply to compiled languages, although some (such as module resolution) should apply to all of them. Implement these optimizations in the simplest way possible, with no changes to the library interface.
+
+### Module Resolution
+
+A WASI binary must first be downloaded from the network and compiled into a WASM module before it can be run. The library should ensure module re-use in two ways:
+
+1. Across sessions, for a given URL, the binary should not be re-downloaded. Once a toolchain has been downloaded, it should be cached by the browser to avoid the latency of a redownload. We will control versioning of toolchain artifacts via URL rewrites (we control the version of these binaries). Using `{ cache: "force-cache" }` should be sufficient.
+2. Within a given session, we should cache WASM module compilation. Prefer sending modules via `postMessage` once they have been compiled rather than re-compiling.
+
+To be clear, this only needs to be done when fetching modules from the web. Dynamically generated WASM binaries from user code may be recompiled as needed.
+
+### Sysroot Caching
+
+It should be possible to avoid downloading/loading the same toolchain sysroot more than once. We should, at the very least, avoid re-downloading by employing `force-cache` as described above. If we are able to represent sysroots as a secondary mount in the Wasmer overlay filesystem, then there should be a creative way to re-use a sysroot that has already been created and mount it into the overlay filesystem. Ideally, sysroot initialization becomes a zero-copy operation.
+
+### Parallel Compilation
+
+If multiple sources need to be compiled, compile them in parallel by spawning additional workers, up to `navigator.hardwareConcurrency`. This motivates the idea of having a pool of workers that are ready to do work. Workers should be spawned lazily as the number of sources requires. Workers should be re-used: a worker that finishes running a binary should not be dismantled, but rather used for another upcoming operation. Each worker is thus a stateless executor waiting to receive work to be done. If a worker crashes due to an unrecoverable error, it should be terminated and replaced (lazily) with another worker.
+
+Note: you should not implement subprocess support in the Wasmer sense (i.e. support for `posix_spawn` and `fork`-style syscalls). It is fine if the main thread becomes the principal orchestrator of work, and the worker threads operate on top of a lightweight shared filesystem. You should keep the worker logic and orchestration logic simple and well-defined.
+
+### Compilation Caching
+
+> Only implement this optimization for the `cpp` toolchain.
+
+Implement simple compilation caching using compiler-emitted dependency files (e.g. `/build/main.cpp.d`) and filesystem modification timestamps. In particular, only recompile a source if it is stale. A source is stale when its object file or `.d` file is missing, or when the source or any header listed in its `.d` file is missing or has a modification time newer than the object file.
+
+The advantage of this approach is that it requires no additional data structures: all information about whether a source needs to be compiled can be found just by looking at the filesystem.

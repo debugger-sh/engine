@@ -170,6 +170,13 @@ interface CppOptions {
   sources?: string[];
 
   /**
+   * The directory where object files and compiled executables will be placed.
+   *
+   * Defaults to `/build`
+   */
+  buildDir?: string;
+
+  /**
    * Additional flags to apply when invoking the compiler.
    */
   cxxFlags?: string[];
@@ -187,6 +194,13 @@ interface RustOptions {
    * Defaults to `["**\*.rs"]`
    */
   sources?: string[];
+
+  /**
+   * The directory where object files and compiled executables will be placed.
+   *
+   * Defaults to `/build`
+   */
+  buildDir?: string;
 
   /**
    * Additional flags to apply when invoking `rustc`.
@@ -294,3 +308,32 @@ process.debugger.send({ type: 'request', command: 'initialize' /* ... */ });
 As is currently the case, the debugger for a compiler-enabled toolchain (e.g. C/C++, Rust) debugs only the execution step in a toolchain (i.e. the user's code). Access to the debugger for a process with `debug: false` will no-op.
 
 If `debug: true` is enabled for a non-toolchain command (e.g. an arbitrary WASI executable), debugging will proceed as if the executable had been produced by a compiler toolchain. That is, these executables will be debugged via DWARF inspection and WASM instrumentation. Assume that the provided executable has debug info, i.e. the DWARF exists in the same location in the binary as if it were produced by a compiler/linker toolchain.
+
+## Toolchains
+
+### Object Files
+
+For C/C++ and Rust, object files should be built into the `buildDir` specified in the command options. For example, if `/dir/main.cpp` is a source and `buildDir` is `/build`, then the object file will be compiled to `/build/dir/main.cpp`. Output executables should be placed directly into `buildDir` (e.g. `/build/main`).
+
+### Export individual toolchain steps
+
+`run("cpp")` and `run("rust)` can be thought of as mini-build systems that do the barebones needed to compile, link and run a piece of code. However, users who want to engineer their own build systems should have the ability to run the individual steps as well. For instance, a user should be able to compile, link, and run a file like so:
+
+```ts
+await engine.run('clang++', [
+  /* compiler args */
+]);
+
+// Could also have done:
+//
+//  await engine.run("clang++", [/* compiler args */]);
+//  await engine.run("rustc", [/* compiler args */]);
+//
+
+await engine.run('lld', [, /* compiler args */ '-o', 'main']);
+await engine.run('/main');
+
+/** Rust */
+```
+
+(This is just a sketch of what this might look like).
