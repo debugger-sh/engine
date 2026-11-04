@@ -90,6 +90,10 @@ stat(path: string): Promise<FileStat>;
 readDir(path: string): Promise<DirectoryEntry[]>;
 ```
 
+### Support for relative paths
+
+The old version of this library may not have supported relative paths. For example, trying to read from `data.txt` may have thrown an error. The library should treat relative paths as relative to the root folder of the engine, such that `data.txt` and `/data.txt` refer to the same file.
+
 ## Processes
 
 This will be the most significant rewrite of the engine library. Previously, the `run()` method would have exclusive control of the engine (i.e. in order to call `run()` again, the previous call would either need to finish or be explicitly stopped). Furthermore, the effect of calling `run()` would depend on which language toolchain is being used (depending on which language is selected, either the C/C++, Rust, or Python toolchains would be invoked). In the new version, we will scope execution of a toolchain to a specific "process" in a way that allows multiple processes to be invoked simultaneously.
@@ -211,6 +215,16 @@ interface RustOptions {
 
 Note: processes begin to run as soon as they are instantiated (with a caveat for processes in debug mode, see more details below).
 
+#### Command resolution order
+
+To avoid ambiguity, treat `command` as:
+
+1. A WASI executable to be downloaded if it is a URL (starts with `http://` or `https://`).
+2. A WASI executable to be loaded from the filesystem if it is an absolute path (e.g. `/main`).
+3. A toolchain or built-in command, if any (e.g. `clang++` or `python`).
+
+Note that there is no ambiguity between (2) and (3): (2) requires an absolute path for an executable to be loaded from the filesystem.
+
 #### Argument semantics
 
 For regular WASI programs, `args` is treated directly as the arguments array passed to the program. For language toolchains, which represent a sequence of several build steps, the meaning of `args` may have a special contextual meaning, as described below.
@@ -326,14 +340,18 @@ await engine.run('clang++', [
 
 // Could also have done:
 //
-//  await engine.run("clang++", [/* compiler args */]);
+//  await engine.run("clang", [/* compiler args */]);
 //  await engine.run("rustc", [/* compiler args */]);
 //
 
-await engine.run('lld', [, /* compiler args */ '-o', 'main']);
+await engine.run('lld', [, /* compiler args */ '-o', '/main']);
 await engine.run('/main');
-
-/** Rust */
 ```
 
-(This is just a sketch of what this might look like).
+This is treated as a hardcoded list of supported commands:
+
+- **`cpp`**, **`c`**: A simple C++ toolchain and build system which compiles, links, runs, and optionally debugs C++ programs according to `CppOptions`.
+- **`rust`**: A simple Rust toolchain which compiles, links, runs, and optionally debugs Rust programs according to `RustOptions`.
+- **`python`**: A simple Python toolchain which interprets and optionally debugs Python programs.
+- **`clang++`**, **`clang`**: The Clang compiler.
+- **`rustc`**: The Rust compiler.
