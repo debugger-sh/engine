@@ -176,12 +176,6 @@ pub(crate) fn stop(exit_code: i32, build_start: Instant, run_start: Option<Insta
 }
 
 async fn start(msg: WorkerStart) {
-    if msg.host_device.is_some() && !matches!(msg.lang, Lang::C | Lang::Python) {
-        return WorkerOut::Error {
-            message: "Host devices are supported only for C/C++ and Python execution".into(),
-        }
-        .send();
-    }
     match msg.lang {
         Lang::Python => crate::python::worker::start(msg).await,
         Lang::C | Lang::Rust => start_native(msg).await,
@@ -213,15 +207,7 @@ async fn start_native(msg: WorkerStart) {
 
     match msg.lang {
         Lang::C => {
-            let host_device = match msg.host_device.map(HostDeviceFile::new).transpose() {
-                Ok(device) => device,
-                Err(error) => {
-                    return WorkerOut::Error {
-                        message: format!("Invalid host device: {error}"),
-                    }
-                    .send();
-                }
-            };
+            let host_device = msg.host_device.map(HostDeviceFile::new);
             let llvm = fetch_bytes(CPP_WASM_URL).await.expect("toolchain");
             exec.write_bytes("/llvm.core.wasm", &llvm)
                 .await
