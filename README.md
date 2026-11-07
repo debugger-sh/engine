@@ -46,6 +46,12 @@ await engine.run();
 
 > Programs compile in **debug mode** by default, so a [DAP](https://microsoft.github.io/debug-adapter-protocol/) handshake is required before `run()` will proceed — see the [integration guide](./docs/integration.md#debugger-dap). To skip it, set `engine.debugger.enabled = false`.
 
+C++ `throw`/`catch` and destructors during unwinding work in Run and Debug. Some
+errors raised inside the prebuilt standard library still end the program instead of
+being catchable, because that library was built without exception support. Upstream
+notices and provenance for the embedded runtime pieces are in `share/licenses/cpp-exceptions/`
+inside [runtime.tar.gz](./assets/cpp-exceptions/runtime.tar.gz).
+
 ---
 
 ## Full API
