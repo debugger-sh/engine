@@ -4,6 +4,7 @@ import { prefetch_urls, StdoutMode, WorkerOut, WorkerStart } from '../../pkg/eng
 import init from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
+import { HostDeviceOpener, HostDeviceSession } from './host-device';
 import { errorResult, Internals } from './util';
 import RustWorker from './worker?worker&inline';
 
@@ -56,6 +57,9 @@ export class Engine {
    */
   public fs: DirNode = {};
 
+  /** Optional C/C++ and Python byte device. The opener is captured once at the start of each run. */
+  public hostDevice?: HostDeviceOpener;
+
   static async create(lang: Lang): Promise<Engine> {
     await init({ module_or_path: wasmBinary });
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
@@ -93,6 +97,7 @@ export class Engine {
   private async execute(): Promise<RunResult> {
     const totalStart = performance.now();
     const worker = new RustWorker();
+    let device: HostDeviceSession | undefined;
 
     /* Set up handling for stdout/stderr */
     this.stdout[Internals].attach(worker);
@@ -100,6 +105,9 @@ export class Engine {
     this.debugger[Internals].attach(worker);
 
     try {
+      if (this.hostDevice && this.lang !== 'c' && this.lang !== 'python')
+        throw new TypeError('Host devices are supported only for C/C++ and Python execution');
+      if (this.hostDevice) device = new HostDeviceSession(this.hostDevice);
       return await new Promise<RunResult>(async (resolve, reject) => {
         this.rejector = () => reject('stopped');
 
@@ -133,13 +141,15 @@ export class Engine {
               type: 'error',
               error: { type: 'EngineError', message: message.data.message }
             });
+          else if (message.data.type === 'host_wake') device?.drain();
         });
 
         const message: WorkerStart = {
           fs: this.fs,
           lang: this.lang,
           stdin_buffer: this.stdin[Internals].buffer,
-          is_debug: this.debugger.enabled
+          is_debug: this.debugger.enabled,
+          host_device: device?.workerStart
         };
         worker.postMessage(message);
       });
@@ -148,6 +158,7 @@ export class Engine {
       return errorResult(err);
     } finally {
       this.rejector = undefined;
+      device?.close();
       this.stdout[Internals].detach(worker);
       this.stderr[Internals].detach(worker);
       this.stdin[Internals].clear();
@@ -259,3 +270,5 @@ export class Stdin {
 }
 
 export * from './debugger';
+export { HOST_DEVICE_PATH } from './host-device';
+export type { HostDevice, HostDeviceOpener } from './host-device';

@@ -57,6 +57,7 @@ engine.fs; // DirNode  — virtual filesystem, set before run()
 engine.stdout; // Stdout   — .on('data', (chunk: Uint8Array) => …) / .off(...)
 engine.stderr; // Stdout
 engine.stdin; // Stdin    — .write(string | Uint8Array): Promise<void>
+engine.hostDevice; // Optional C/C++ and Python duplex byte device — see below
 engine.debugger; // Debugger — DAP interface; set .enabled = false to skip the handshake
 engine.lang; // Lang
 
@@ -86,6 +87,18 @@ await engine.stdin.write(new TextEncoder().encode('42\n'));
 
 ---
 
+For C/C++ or Python host I/O, set `engine.hostDevice` to a function receiving
+`{ signal, onData, write }`. The guest opens `HOST_DEVICE_PATH` with `O_RDWR` for
+blocking reads/writes; polling is unsupported. `write` snapshots bytes; await each
+write. Stop/exit aborts the per-run signal and rejects pending writes. Terminal I/O
+stays separate.
+
+Python uses the same device through `os.open("/dev/debugger-sh-host", os.O_RDWR)`,
+`os.read(fd, size)`, and `os.write(fd, data)`. Reads and writes may be partial;
+loop until a complete application-defined message has transferred. The device
+is a byte stream: framing, request/response matching, and graphics or AI behavior
+belong to the application. It is absent when no opener is supplied.
+
 ## Example project
 
 For a full reference integration, see the [debugger.sh IDE](https://github.com/debugger-sh/debugger.sh) — a Next.js + MUI app wiring up CodeMirror 6, xterm.js, and `debugger-sh` into a working in-browser IDE.
@@ -102,6 +115,8 @@ npm install
 npm run build   # wasm-pack build --target web && vite build
 npm run dev     # local development
 ```
+
+Test after building: `npx -y bun tools/host-device/run.ts`.
 
 To test against the reference IDE, clone [debugger-sh/debugger.sh](https://github.com/debugger-sh/debugger.sh) alongside this repo and link:
 

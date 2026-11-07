@@ -9,10 +9,12 @@ use crate::types::{FsNode, Lang, WorkerOut, WorkerStart};
 
 mod debuggee;
 pub(crate) mod execution;
+pub(crate) mod host_device;
 mod io;
 mod runtime;
 
 use execution::{Execution, fetch_bytes};
+use host_device::{HOST_DEVICE_PATH, HostDeviceFile};
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Helpers                                                                  │
@@ -205,11 +207,12 @@ async fn start_native(msg: WorkerStart) {
 
     match msg.lang {
         Lang::C => {
+            let host_device = msg.host_device.map(HostDeviceFile::new);
             let llvm = fetch_bytes(CPP_WASM_URL).await.expect("toolchain");
             exec.write_bytes("/llvm.core.wasm", &llvm)
                 .await
                 .expect("toolchain");
-            start_cpp(is_debug, build_start, sources, exec, fs).await;
+            start_cpp(is_debug, build_start, sources, exec, fs, host_device).await;
         }
         Lang::Rust => start_rust(is_debug, build_start, sources, exec, fs).await,
         Lang::Python => unreachable!(),
@@ -222,6 +225,7 @@ async fn start_cpp(
     sources: Vec<String>,
     exec: Execution,
     fs: mem_fs::FileSystem,
+    host_device: Option<HostDeviceFile>,
 ) {
     let mut obj_paths: Vec<String> = Vec::with_capacity(sources.len());
     let mut union_fs: Option<Box<dyn FileSystem>> = Some(Box::new(fs));
@@ -309,13 +313,11 @@ async fn start_cpp(
     }
 
     let run_start = Instant::now();
-    let exit = exec
-        .step("main")
-        .binary("/main.wasm")
-        .debug(is_debug)
-        .run()
-        .await
-        .expect("Running succeeded");
+    let mut run = exec.step("main").binary("/main.wasm").debug(is_debug);
+    if let Some(device) = host_device {
+        run = run.device_file(HOST_DEVICE_PATH, Box::new(device));
+    }
+    let exit = run.run().await.expect("Running succeeded");
 
     stop(exit.raw(), build_start, Some(run_start)).send();
 }
