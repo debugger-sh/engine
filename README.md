@@ -110,8 +110,7 @@ module and Chromium browser:
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tools/stdin/run.mjs
 ```
 
-The checks cover an empty read without input, sequential Python input across reruns,
-stopping blocked input, and C++ input. Pass a built or unpacked release's
+The check covers an empty read without input. Pass a built or unpacked release's
 `dist/debugger-sh.js` as the first argument to test that artifact.
 
 To test against the reference IDE, clone [debugger-sh/debugger.sh](https://github.com/debugger-sh/debugger.sh) alongside this repo and link:
