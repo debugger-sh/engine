@@ -27,7 +27,7 @@ window.probe = {
     this.pch = new Uint8Array(await (await fetch('/fixture.pch')).arrayBuffer());
     this.archive = new Uint8Array(await (await fetch('/libfixture.a')).arrayBuffer());
   },
-  begin({ header, source, plain = false, debug = false, snapshot = false, invalid }) {
+  begin({ header, source, plain = false, debug = false, invalid }) {
     this.state = { stdout: '', stderr: '', done: false, events: [] };
     this.seq = 1;
     this.engine.debugger.enabled = debug;
@@ -56,13 +56,6 @@ window.probe = {
       this.state.error = String(error);
       this.state.done = true;
     });
-    if (snapshot) {
-      this.engine.binaryFiles['/fixture.pch'].fill(0);
-      this.engine.binaryFiles['/libfixture.a'].fill(0);
-      this.engine.cppArtifacts.sources[0] = '/missing.cpp';
-      this.engine.cppArtifacts.archives[0] = '/missing.a';
-      this.engine.cppArtifacts.precompiledHeader = '/missing.pch';
-    }
     if (debug) this.send('initialize');
   },
   send(command, args = {}) {
@@ -126,8 +119,8 @@ try {
   assert.equal(await page.evaluate(() => crossOriginIsolated), true);
   await page.evaluate(() => window.probe.create());
 
-  await begin({ snapshot: true });
-  await complete('Run: PCH, archive, selected source, and binary/options snapshot');
+  await begin();
+  await complete('Run: PCH, archive, and selected source');
 
   await begin({ debug: true });
   await page.waitForFunction(
@@ -181,8 +174,8 @@ try {
   await complete('Debug: PCH, archive, source breakpoint, Step Over and continue');
 
   for (const [invalid, message] of [
-    ['source', 'C++ sources must select existing source files'],
-    ['empty sources', 'C++ sources must select existing source files'],
+    ['source', 'C/C++ sources must select existing source files'],
+    ['empty sources', 'C/C++ sources must select existing source files'],
     ['missing archive', 'Missing binary build input: /missing.a'],
     ['missing PCH', 'Missing binary build input: /missing.pch'],
     ['binary path', 'Invalid binary input path: /bad/../file']

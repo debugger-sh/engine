@@ -95,18 +95,11 @@ All fields are optional. Without `sources`, the engine compiles every source in
 `engine.fs`. Selected sources must exist and cannot be empty; archive and PCH
 paths must have matching bytes in `binaryFiles`. Binary paths must be absolute,
 cannot contain empty, `.` or `..` components, and cannot replace existing files.
-The engine snapshots the binary bytes and artifact options when a run starts.
 Clear them before reusing an engine for an ordinary source-only run.
 
 Build artifacts with the same compiler, sysroot, and flags as the engine. A PCH
 also needs its original header files at their original virtual paths. These
 inputs work in Run and Debug for C/C++ only; Python and Rust reject them.
-
-After building, run the browser regression with an existing Playwright installation:
-
-```bash
-PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tools/cpp-artifacts/run.mjs
-```
 
 ---
 
@@ -136,6 +129,12 @@ cargo install wasm-pack
 npm install
 npm run build   # wasm-pack build --target web && vite build
 npm run dev     # local development
+```
+
+After building, run the browser regression with an existing Playwright installation:
+
+```bash
+PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tools/cpp-artifacts/run.mjs
 ```
 
 To test against the reference IDE, clone [debugger-sh/debugger.sh](https://github.com/debugger-sh/debugger.sh) alongside this repo and link:

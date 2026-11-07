@@ -190,7 +190,7 @@ async fn start_native(msg: WorkerStart) {
     let mut artifacts = msg.cpp_artifacts.unwrap_or_default();
     if let Some(selected) = artifacts.sources.take() {
         if selected.is_empty() || selected.iter().any(|path| !sources.contains(path)) {
-            return WorkerOut::Error { message: "C++ sources must select existing source files".into() }.send();
+            return WorkerOut::Error { message: "C/C++ sources must select existing source files".into() }.send();
         }
         sources = selected;
     }

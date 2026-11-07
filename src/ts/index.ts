@@ -1,6 +1,6 @@
 import EventEmitter from 'events';
 
-import { prefetch_urls, WorkerOut, WorkerStart } from '../../pkg/engine';
+import { prefetch_urls, StdoutMode, WorkerOut, WorkerStart } from '../../pkg/engine';
 import init from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
@@ -8,7 +8,6 @@ import { errorResult, Internals } from './util';
 import RustWorker from './worker?worker&inline';
 
 export type Lang = 'c' | 'python' | 'rust';
-type StdoutMode = 1 | 2;
 
 /** Optional inputs produced by the same C++ toolchain as this engine. */
 export interface CppArtifacts {
@@ -71,11 +70,7 @@ export class Engine {
   static async create(lang: Lang): Promise<Engine> {
     await init({ module_or_path: wasmBinary });
     if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
-      // Drain prefetches so an unread response cannot hold the browser cache entry open.
-      for (const url of prefetch_urls(lang))
-        void fetch(url, { cache: 'force-cache' })
-          .then((response) => response.arrayBuffer())
-          .catch(() => {});
+      for (const url of prefetch_urls(lang)) void fetch(url, { cache: 'force-cache' });
     return new Engine(lang);
   }
 
@@ -108,8 +103,6 @@ export class Engine {
 
   private async execute(): Promise<RunResult> {
     const totalStart = performance.now();
-    const binaryFiles = structuredClone(this.binaryFiles);
-    const cppArtifacts = structuredClone(this.cppArtifacts);
     const worker = new RustWorker();
 
     /* Set up handling for stdout/stderr */
@@ -155,8 +148,8 @@ export class Engine {
 
         const message: WorkerStart = {
           fs: this.fs,
-          binary_files: binaryFiles,
-          cpp_artifacts: cppArtifacts ?? null,
+          binary_files: this.binaryFiles,
+          cpp_artifacts: this.cppArtifacts ?? null,
           lang: this.lang,
           stdin_buffer: this.stdin[Internals].buffer,
           is_debug: this.debugger.enabled
