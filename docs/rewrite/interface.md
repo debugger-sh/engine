@@ -163,11 +163,18 @@ interface PythonOptions {
    * Note that this is moved from the existing debugger interface.
    */
   filterInternals?: boolean;
+
+  /**
+   * Whether to run an interactive REPL. Only applies when no `args` are given.
+   *
+   * Defaults to `false`.
+   */
+  repl?: boolean;
 }
 
 interface CppOptions {
   /**
-   * List of file globs for determining C/C++ sources to compile.
+   * List of file globs, evaluated relative to `cwd`, for determining C/C++ sources to compile.
    *
    * Defaults to `["**\*.{c,cc,cp,cpp,cxx,c++}"]`
    */
@@ -193,7 +200,7 @@ interface CppOptions {
 
 interface RustOptions {
   /**
-   * List of file globs for determining Rust sources to compile.
+   * List of file globs, evaluated relative to `cwd`, for determining Rust sources to compile.
    *
    * Defaults to `["**\*.rs"]`
    */
@@ -239,7 +246,7 @@ Same behaviour as `cpp`.
 
 ##### `python`
 
-No special handling is applied to `args`: it is forwarded perfectly to the `python` binary.
+If `args` are given, they are forwarded perfectly to the `python` binary. Otherwise, the first Python file found under `cwd` is run, or the process exits with a non-zero exit code if none is found. If `repl: true` is set (and no `args` are given), an interactive REPL is run instead.
 
 ### Waiting for a process to complete
 
@@ -277,7 +284,7 @@ const process = engine.run('cpp');
 process.kill();
 ```
 
-If a process is killed, the resulting exit code will be 130 to mirror the Unix style `SIGTERM` exit code.
+If a process is killed, the resulting exit code will be 137 to mirror the Unix style `SIGKILL` exit code.
 
 ### Process I/O
 
@@ -327,11 +334,11 @@ If `debug: true` is enabled for a non-toolchain command (e.g. an arbitrary WASI 
 
 ### Object Files
 
-For C/C++ and Rust, object files should be built into the `buildDir` specified in the command options. For example, if `/dir/main.cpp` is a source and `buildDir` is `/build`, then the object file will be compiled to `/build/dir/main.cpp`. Output executables should be placed directly into `buildDir` (e.g. `/build/main`).
+For C/C++ and Rust, object files should be built into the `buildDir` specified in the command options. For example, if `/dir/main.cpp` is a source and `buildDir` is `/build`, then the object file will be compiled to `/build/dir/main.cpp.o`. Output executables should be placed directly into `buildDir` and are always named `main` (i.e. `/build/main`).
 
 ### Export individual toolchain steps
 
-`run("cpp")` and `run("rust)` can be thought of as mini-build systems that do the barebones needed to compile, link and run a piece of code. However, users who want to engineer their own build systems should have the ability to run the individual steps as well. For instance, a user should be able to compile, link, and run a file like so:
+`run("cpp")` and `run("rust")` can be thought of as mini-build systems that do the barebones needed to compile, link and run a piece of code. However, users who want to engineer their own build systems should have the ability to run the individual steps as well. For instance, a user should be able to compile, link, and run a file like so:
 
 ```ts
 await engine.run('clang++', [
@@ -344,14 +351,15 @@ await engine.run('clang++', [
 //  await engine.run("rustc", [/* compiler args */]);
 //
 
-await engine.run('lld', [, /* compiler args */ '-o', '/main']);
+await engine.run('lld', [/* compiler args */ '-o', '/main']);
 await engine.run('/main');
 ```
 
 This is treated as a hardcoded list of supported commands:
 
-- **`cpp`**, **`c`**: A simple C++ toolchain and build system which compiles, links, runs, and optionally debugs C++ programs according to `CppOptions`.
+- **`cpp`**: A simple C++ toolchain and build system which compiles, links, runs, and optionally debugs C++ programs according to `CppOptions`.
 - **`rust`**: A simple Rust toolchain which compiles, links, runs, and optionally debugs Rust programs according to `RustOptions`.
 - **`python`**: A simple Python toolchain which interprets and optionally debugs Python programs.
 - **`clang++`**, **`clang`**: The Clang compiler.
 - **`rustc`**: The Rust compiler.
+- **`lld`**: The LLVM linker.
