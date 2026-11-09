@@ -10,33 +10,32 @@ import type { Backend, BackendOptions, Json } from '../run';
 
 export async function createEngineBackend(opts: BackendOptions): Promise<Backend> {
   const { Engine } = await import('debugger-sh');
-  const engine = await Engine.create(opts.lang);
-  engine.debugger.enabled = true;
+  const engine = await Engine.create();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  engine.fs = opts.fsNode as unknown as any;
+  await engine.fs.mount(opts.fsNode as unknown as any);
+  const toolchain = opts.lang === 'c' ? 'cpp' : opts.lang;
+  const proc = engine.run(toolchain, { debug: true });
 
   const decoder = new TextDecoder();
   const onIo = (chunk: Uint8Array) => {
     process.stdout.write(chalk.gray(decoder.decode(chunk)));
   };
-  engine.stdout.on('data', onIo);
-  engine.stderr.on('data', onIo);
+  proc.stdout.on('data', onIo);
+  proc.stderr.on('data', onIo);
 
   const eventCbs: ((e: Json) => void)[] = [];
   const artifactTasks: Promise<void>[] = [];
 
-  engine.debugger.on('event', (msg: unknown) => {
+  proc.debugger.on('event', (msg: unknown) => {
     for (const cb of eventCbs) cb(msg as Json);
   });
-  engine.debugger.on('artifact', (artifact) => {
+  proc.debugger.on('artifact', (artifact) => {
     const task = handleArtifactOutput(opts.testOutputDir, artifact).catch((err) => {
       console.log(`${chalk.cyan('info')} artifact output failed: ${String(err)}`);
     });
     artifactTasks.push(task);
     void task;
   });
-
-  const runPromise = engine.run();
 
   return {
     async send(req) {
@@ -56,18 +55,17 @@ export async function createEngineBackend(opts: BackendOptions): Promise<Backend
           command: request.command ?? 'launch'
         };
       }
-      return engine.debugger.send(req) as Json;
+      return proc.debugger.send(req) as Json;
     },
     onEvent(cb) {
       eventCbs.push(cb);
     },
     async shutdown() {
-      await Promise.race([runPromise, new Promise((resolve) => setTimeout(resolve, 1500))]).catch(
-        () => {
-          /* swallow; reported as test failure if needed */
-        }
-      );
+      await Promise.race([proc, new Promise((resolve) => setTimeout(resolve, 1500))]).catch(() => {
+        /* swallow; reported as test failure if needed */
+      });
       await Promise.all(artifactTasks);
+      engine.dispose();
     }
   };
 }

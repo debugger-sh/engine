@@ -1,4 +1,4 @@
-import { type RunResult } from '.';
+import { try_lock, unlock } from '../../pkg/engine';
 
 /**
  * An exported symbol that allows us to define properties
@@ -7,15 +7,39 @@ import { type RunResult } from '.';
  */
 export const Internals: unique symbol = Symbol();
 
-export function errorResult(err: unknown): RunResult {
-  if (err instanceof Error) {
-    return {
-      type: 'error',
-      error: { type: err.constructor.name, message: err.message }
-    };
+/** Yields to the event loop. */
+export const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+/**
+ * Runs `fn` while holding the shared filesystem lock.
+ *
+ * The main thread must never block on the lock (workers may hold it), so instead
+ * of waiting we spin asynchronously, yielding to the event loop between attempts.
+ */
+export async function locked<T>(fn: () => T): Promise<T> {
+  while (!try_lock()) await tick();
+  try {
+    return fn();
+  } finally {
+    unlock();
   }
-  return {
-    type: 'error',
-    error: { type: typeof err, message: String(err) }
-  };
+}
+
+/** Joins path segments, resolving relative paths against `/`. */
+export function join(...parts: string[]): string {
+  const out: string[] = [];
+  for (const part of parts.join('/').split('/')) {
+    if (part === '..') out.pop();
+    else if (part && part !== '.') out.push(part);
+  }
+  return '/' + out.join('/');
+}
+
+/** Resolves `path` against the directory `cwd`. */
+export function resolve(cwd: string, path: string): string {
+  return path.startsWith('/') ? join(path) : join(cwd, path);
+}
+
+export function dirname(path: string): string {
+  return join(path, '..');
 }

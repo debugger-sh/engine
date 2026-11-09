@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::HashMap;
 use tsify::Tsify;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -91,31 +90,6 @@ offset_type!(
     CodeOffset
 );
 
-#[derive(Debug, Tsify, Deserialize)]
-#[serde(untagged)]
-pub enum FsNode {
-    File(String),
-    Dir(HashMap<String, FsNode>),
-}
-
-#[derive(Debug, Clone, Copy, Tsify, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Lang {
-    C,
-    Python,
-    Rust,
-}
-
-#[derive(Debug, Tsify, Deserialize)]
-pub struct WorkerStart {
-    pub fs: HashMap<String, FsNode>,
-
-    #[serde(with = "serde_wasm_bindgen::preserve")]
-    pub stdin_buffer: js_sys::SharedArrayBuffer,
-    pub is_debug: bool,
-    pub lang: Lang,
-}
-
 #[derive(Clone, Copy, Debug, Tsify, Serialize_repr)]
 #[repr(u8)]
 #[tsify(type = "1 | 2")]
@@ -127,8 +101,6 @@ pub enum StdoutMode {
 #[derive(Tsify, Serialize)]
 #[serde(tag = "type")]
 pub enum WorkerOut<'a> {
-    #[serde(rename = "ready")]
-    Ready,
     #[serde(rename = "stdout")]
     Stdout {
         #[tsify(type = "Uint8Array")]
@@ -165,19 +137,6 @@ pub enum WorkerOut<'a> {
         #[serde(skip_serializing_if = "Option::is_none")]
         frame: Option<String>,
     },
-    #[serde(rename = "stop")]
-    Stop {
-        exit_code: i32,
-        /// Wall time in the worker from job start until the run step begins.
-        build_ms: f64,
-        /// Wall time in the worker for the final run step only.
-        run_ms: f64,
-    },
-
-    /// A setup/runtime failure in the engine itself (e.g. the language runtime
-    /// failed to load) — distinct from the user's program exiting non-zero.
-    #[serde(rename = "error")]
-    Error { message: String },
 }
 
 impl<'a> WorkerOut<'a> {

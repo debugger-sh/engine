@@ -1,4 +1,4 @@
-use instant::Duration;
+use std::time::Duration;
 use std::future::ready;
 use std::pin::Pin;
 use std::sync::Arc;

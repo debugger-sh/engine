@@ -1,0 +1,5 @@
+# Shared-memory WebAssembly (atomics) requires rebuilding `std`, which is nightly-only.
+[toolchain]
+channel = "nightly-2026-11-08"
+components = ["rust-src"]
+targets = ["wasm32-unknown-unknown"]

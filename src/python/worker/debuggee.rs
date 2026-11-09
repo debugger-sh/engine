@@ -21,6 +21,10 @@ pub struct PythonDebuggee {
     response: js_sys::Uint8Array,
 }
 
+// SAFETY: the debuggee is only ever used by the worker thread that created it.
+unsafe impl Send for PythonDebuggee {}
+unsafe impl Sync for PythonDebuggee {}
+
 impl PythonDebuggee {
     pub fn new() -> Self {
         let sab = js_sys::SharedArrayBuffer::new(PYTHON_DEBUG_SAB_SIZE);

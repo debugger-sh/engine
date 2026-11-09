@@ -1,4 +1,4 @@
-import bdb, json
+import bdb, json, os, sys
 
 # Resume commands from the main thread. Must match PYTHON_CMD_* in debug.rs.
 CONTINUE   = 0
@@ -188,7 +188,7 @@ class DapBridge(bdb.Bdb):
         while f is not None:
             name = f.f_code.co_name
             path = f.f_code.co_filename
-            if name == '<module>' and path == '/main.py':
+            if name == '<module>' and path == MAIN:
                 # Module scope — not the same as a function named `main`.
                 display = '__main__'
             else:
@@ -197,7 +197,7 @@ class DapBridge(bdb.Bdb):
                 "file": path,
                 "line": f.f_lineno,
                 "function": display,
-                "user": f.f_code.co_filename == '/main.py',
+                "user": f.f_code.co_filename == MAIN,
                 "locals": [
                     self._format(n, v, 0)
                     for n, v in f.f_locals.items()
@@ -218,10 +218,14 @@ class DapBridge(bdb.Bdb):
         self._dispatch(resp, frame)
 
 
+# Run as `python -c BRIDGE script [args...]`: the script sees `sys.argv == [script, args...]`.
+sys.argv = sys.argv[1:]
+MAIN = os.path.abspath(sys.argv[0])
+
 debugger = DapBridge()
 debugger.consume_initial_config()
-_main = open('/main.py').read()
+_main = open(MAIN).read()
 debugger.run(
-    compile(_main, '/main.py', 'exec'),
-    {'__file__': '/main.py', '__name__': '__main__'}
+    compile(_main, MAIN, 'exec'),
+    {'__file__': MAIN, '__name__': '__main__'}
 )

@@ -1,261 +1,338 @@
-import EventEmitter from 'events';
-
-import { prefetch_urls, StdoutMode, WorkerOut, WorkerStart } from '../../pkg/engine';
-import init from '../../pkg/engine';
+import init, { Fs, type InitOutput } from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
-import { errorResult, Internals } from './util';
-import RustWorker from './worker?worker&inline';
+import { Filesystem } from './fs';
+import { Pool, Process, Stdin, type Stdio, Stdout, type WorkerMessage } from './process';
+import {
+  type BaseOptions,
+  commands,
+  type Context,
+  type StepOptions,
+  sysroots,
+  type Toolchain,
+  type ToolchainOptionsMap,
+  toolchains
+} from './toolchains';
+import { Internals, join, resolve } from './util';
 
-export type Lang = 'c' | 'python' | 'rust';
+/**
+ * A command to run: a language toolchain or built-in command, or a WASI executable
+ * (raw bytes, a URL to fetch, or a path within the workspace).
+ */
+export type CommandLike = Uint8Array | string | Toolchain;
 
-/** Wall-clock timing for a run, in milliseconds. */
-export type Timing = {
-  /** Host time including worker startup and teardown. */
-  totalMs: number;
-  /** Worker time fetching, compiling, and linking before execution. */
-  buildMs: number;
-  /** Worker time for the user program execution step only. */
-  runMs: number;
-};
+/** Toolchains may allow supplying toolchain-specific options. */
+export type CommandOptions<C extends CommandLike> = C extends Toolchain
+  ? BaseOptions & ToolchainOptionsMap[C]
+  : BaseOptions;
 
-/** The engine ran to completion with the provided `exitCode`. */
-export type CompletedResult = { type: 'completed'; exitCode: number; timing: Timing };
-/** The engine was stopped by calling `stop`. */
-export type StoppedResult = { type: 'stopped' };
-/** The engine had an error. This is an error with the engine itself, and not the user's code. */
-export type ErrorResult = { type: 'error'; error: { type: string; message: string } };
-/** The result of calling {@link Engine.run} */
-export type RunResult = CompletedResult | StoppedResult | ErrorResult;
+/** A process spawned with `debug: true`. */
+export interface DebuggableProcess extends Process {
+  readonly debugger: Debugger;
+}
 
-export type FsNode = string | DirNode;
-export type DirNode = { [name: string]: FsNode };
+/** A failure to resolve a program: an exit code, and a message for stderr. */
+type Failure = [code: number, message: string];
 
+const isFailure = (value: unknown): value is Failure => Array.isArray(value);
+
+/** The engine's WebAssembly module and the memory shared by all of its threads. */
+let runtime: Promise<{ module: WebAssembly.Module; exports: InitOutput }> | undefined;
+
+/** Compiled modules (or failures) of fetched commands, by URL. */
+const modules = new Map<string, Promise<WebAssembly.Module | Failure>>();
+
+/** Loaded sysroots (or failures), by URL. Shared by all engines, never copied. */
+const sysrootCache = new Map<string, Promise<Fs | Failure>>();
+
+async function fetchBytes(url: string): Promise<Uint8Array<ArrayBuffer> | Failure> {
+  // Toolchain binaries are versioned by URL, so they can be cached indefinitely.
+  const response = await fetch(url, { cache: 'force-cache' }).catch(() => undefined);
+  if (!response?.ok) return [127, `network error (${response?.status ?? 0})`];
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function cached<T>(
+  cache: Map<string, Promise<T | Failure>>,
+  url: string,
+  load: () => Promise<T | Failure>
+): Promise<T | Failure> {
+  let promise = cache.get(url);
+  if (!promise) {
+    cache.set(url, (promise = load()));
+    // Don't remember failures, so that they may be retried.
+    void promise.then((value) => isFailure(value) && cache.delete(url));
+  }
+  return promise;
+}
+
+/**
+ * An engine represents a workspace (a shared filesystem) on which any number of
+ * concurrent processes operate.
+ */
 export class Engine {
-  public readonly stdout = new Stdout(1);
-  public readonly stderr = new Stdout(2);
-  public readonly stdin = new Stdin();
-  public readonly debugger: Debugger;
+  /** The shared, in-memory filesystem of this engine. */
+  public readonly fs: Filesystem;
 
-  /** A function which, when called, rejects the ongoing execution */
-  private rejector?: () => void;
+  private readonly pool: Pool;
+  private readonly processes = new Set<Process>();
+  private disposed = false;
 
-  /** The ongoing `run` promise, if any */
-  private promise?: Promise<RunResult>;
-
-  /**
-   * The programming language of this engine.
-   */
-  public readonly lang: Lang;
-
-  /**
-   * The *initial* filesystem that the code sees.
-   *
-   * This is neither updated while the code is running, nor
-   * will updating it have any effect on code that is already running.
-   */
-  public fs: DirNode = {};
-
-  static async create(lang: Lang): Promise<Engine> {
-    await init({ module_or_path: wasmBinary });
-    if (typeof window !== 'undefined' && typeof fetch !== 'undefined')
-      for (const url of prefetch_urls(lang)) void fetch(url, { cache: 'force-cache' });
-    return new Engine(lang);
+  /** Creates an engine. */
+  static async create(): Promise<Engine> {
+    runtime ??= (async () => {
+      const binary = wasmBinary as unknown as URL | Uint8Array<ArrayBuffer>;
+      const module = await WebAssembly.compile(
+        binary instanceof URL ? await (await fetch(binary)).arrayBuffer() : binary
+      );
+      const exports = await init({ module_or_path: module });
+      return { module, exports };
+    })();
+    return new Engine(await runtime);
   }
 
-  private constructor(lang: Lang) {
-    this.debugger = new Debugger();
-    this.lang = lang;
-  }
-
-  /**
-   * Stops the currently running execution.
-   */
-  public stop(): void {
-    this.rejector?.();
-  }
-
-  /**
-   * Runs the program. {@link CompletedResult} carries build/run timing: `timing.runMs`
-   * is the isolated user-program execution step, `timing.buildMs` covers toolchain fetch,
-   * compile, and link, and `timing.totalMs` adds host-side worker startup and teardown.
-   */
-  public async run(): Promise<RunResult> {
-    if (this.promise) return this.promise;
-    this.promise = this.execute();
-    try {
-      return await this.promise;
-    } finally {
-      this.promise = undefined;
-    }
-  }
-
-  private async execute(): Promise<RunResult> {
-    const totalStart = performance.now();
-    const worker = new RustWorker();
-
-    /* Set up handling for stdout/stderr */
-    this.stdout[Internals].attach(worker);
-    this.stderr[Internals].attach(worker);
-    this.debugger[Internals].attach(worker);
-
-    try {
-      return await new Promise<RunResult>(async (resolve, reject) => {
-        this.rejector = () => reject('stopped');
-
-        /** If the worker ever errors, we crash this promise */
-        worker.addEventListener('error', (evt) => reject(evt.error));
-
-        /* Wait for the worker to send us a Ready message */
-        await new Promise<void>((resolveReady) => {
-          const callback = (message: MessageEvent<WorkerOut>) => {
-            if (message.data.type === 'ready') {
-              worker.removeEventListener('message', callback);
-              resolveReady();
-            }
-          };
-          worker.addEventListener('message', callback);
-        });
-
-        worker.addEventListener('message', (message: MessageEvent<WorkerOut>) => {
-          if (message.data.type === 'stop')
-            resolve({
-              type: 'completed',
-              exitCode: message.data.exit_code,
-              timing: {
-                totalMs: performance.now() - totalStart,
-                buildMs: message.data.build_ms,
-                runMs: message.data.run_ms
-              }
-            });
-          else if (message.data.type === 'error')
-            resolve({
-              type: 'error',
-              error: { type: 'EngineError', message: message.data.message }
-            });
-        });
-
-        const message: WorkerStart = {
-          fs: this.fs,
-          lang: this.lang,
-          stdin_buffer: this.stdin[Internals].buffer,
-          is_debug: this.debugger.enabled
-        };
-        worker.postMessage(message);
-      });
-    } catch (err: unknown) {
-      if (err === 'stopped') return { type: 'stopped' };
-      return errorResult(err);
-    } finally {
-      this.rejector = undefined;
-      this.stdout[Internals].detach(worker);
-      this.stderr[Internals].detach(worker);
-      this.stdin[Internals].clear();
-      worker.terminate();
-    }
-  }
-}
-
-export class Stdout extends EventEmitter<{ data: [Uint8Array] }> {
-  private readonly callback: (event: MessageEvent<WorkerOut>) => void;
-
-  [Internals]: {
-    attach(worker: Worker): void;
-    detach(worker: Worker): void;
-  };
-
-  constructor(private readonly mode: StdoutMode) {
-    super();
-    this.callback = ((event: MessageEvent<WorkerOut>) => {
-      const msg = event.data;
-      if (msg.type !== 'stdout') return;
-      if (msg.mode !== this.mode) return;
-      const chunk = msg.data as Uint8Array<ArrayBuffer>;
-      this.emit('data', chunk);
-    }).bind(this);
-
-    this[Internals] = {
-      attach: this.attach.bind(this),
-      detach: this.detach.bind(this)
+  private constructor({ module, exports }: { module: WebAssembly.Module; exports: InitOutput }) {
+    this.fs = new Filesystem(new Fs());
+    const spawn = (gate: number) => {
+      const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+      worker.postMessage({ type: 'init', module, memory: exports.memory, gate });
+      return worker;
     };
+    // A thread must not free its own memory, so we free it once it is terminated.
+    this.pool = new Pool(spawn, (tls, stack) => exports.__wbindgen_thread_destroy(tls, stack));
   }
 
-  private attach(worker: Worker) {
-    worker.addEventListener('message', this.callback);
+  /** Kills any running processes and releases the memory held by the engine. */
+  public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const process of this.processes) process.kill();
+    this.pool.dispose();
+    this.fs[Internals].dispose();
   }
 
-  private detach(worker: Worker) {
-    worker.removeEventListener('message', this.callback);
-  }
-}
-
-export class Stdin {
   /**
-   * Ring buffer to store stdin data.
+   * Runs a command, returning the (already running) process.
    *
-   * - TypeScript controls write_index, Rust controls read_index
-   * - One slot is always kept empty to distinguish full from empty
+   * `command` is interpreted as, in order:
+   *  1. A WASI executable to download, if it is a URL (`http://` or `https://`).
+   *  2. A WASI executable in the filesystem, if it is an absolute or `.`-prefixed path.
+   *  3. A toolchain (`cpp`, `rust`, `python`) or built-in command (`clang`, `clang++`, `lld`, `rustc`).
+   *
+   * With `debug: true`, the process waits for the DAP handshake on `proc.debugger`.
    */
+  public run<C extends CommandLike>(
+    command: C,
+    options: CommandOptions<C> & { debug: true }
+  ): DebuggableProcess;
+  public run<C extends CommandLike>(command: C, options?: CommandOptions<C>): Process;
+  public run<C extends CommandLike>(
+    command: C,
+    args: string[],
+    options: CommandOptions<C> & { debug: true }
+  ): DebuggableProcess;
+  public run<C extends CommandLike>(
+    command: C,
+    args: string[],
+    options?: CommandOptions<C>
+  ): Process;
+  public run(
+    command: CommandLike,
+    args?: string[] | (BaseOptions & PythonFilter),
+    options?: BaseOptions & PythonFilter
+  ): Process {
+    if (this.disposed) throw new Error('The engine has been disposed');
+    if (!Array.isArray(args)) [args, options] = [[], args];
+    options ??= {};
 
-  private static readonly BUFFER_SIZE = 2048;
-  private static readonly HEADER_SIZE = 8; // 2 x i32
-  private static readonly DATA_SIZE = Stdin.BUFFER_SIZE - Stdin.HEADER_SIZE;
-  private static readonly READ_IDX = 0;
-  private static readonly WRITE_IDX = 1;
-  private static encoder = new TextEncoder();
+    const stdio = { stdin: new Stdin(), stdout: new Stdout(), stderr: new Stdout() };
+    const debug = options.debug ? new Debugger(options.filterInternals) : undefined;
+    const process = this.spawn(stdio, debug, command, args, options);
 
-  private readonly buffer = new SharedArrayBuffer(Stdin.BUFFER_SIZE);
-  private readonly indices: Int32Array;
-  private readonly data: Int8Array;
-
-  [Internals]: {
-    clear(): void;
-    buffer: SharedArrayBuffer;
-  };
-
-  constructor() {
-    this.indices = new Int32Array(this.buffer, 0, 2);
-    this.data = new Int8Array(this.buffer, Stdin.HEADER_SIZE);
-    this[Internals] = {
-      clear: this.clear.bind(this),
-      buffer: this.buffer
+    this.processes.add(process);
+    const finish = () => {
+      this.processes.delete(process);
+      debug?.[Internals].receive({ type: 'stop' });
     };
+    process.then(finish, finish);
+    return process;
   }
 
-  private clear() {
-    this.indices.fill(0);
+  private spawn(
+    stdio: Stdio,
+    debug: Debugger | undefined,
+    command: CommandLike,
+    args: string[],
+    options: StepOptions
+  ): Process {
+    return new Process(stdio, debug, (process) => this.exec(process, command, args, options));
   }
 
-  public async write(value: Uint8Array | string): Promise<void> {
-    const chunk = typeof value === 'string' ? Stdin.encoder.encode(value) : value;
-    return this.writeBytes(chunk);
+  private async exec(
+    process: Process,
+    command: CommandLike,
+    args: string[],
+    options: StepOptions
+  ): Promise<number> {
+    if (command instanceof Uint8Array) return this.job(process, { bytes: command }, args, options);
+    if (/^https?:\/\//.test(command)) return this.job(process, { url: command }, args, options);
+    if (command.startsWith('/') || command.startsWith('.'))
+      return this.job(process, { path: command }, args, options);
+    if (command in toolchains) return this.toolchain(process, command as Toolchain, args, options);
+    if (command in commands) {
+      const [url, name] = commands[command];
+      return this.job(process, { url }, args, { name, ...options });
+    }
+    process.error(`${command}: command not found`);
+    return 127;
   }
 
-  private async writeBytes(chunk: Uint8Array): Promise<void> {
-    const { DATA_SIZE, READ_IDX, WRITE_IDX } = Stdin;
-    let offset = 0;
-
-    while (offset < chunk.length) {
-      const readIdx = Atomics.load(this.indices, READ_IDX);
-      let writeIdx = Atomics.load(this.indices, WRITE_IDX);
-
-      if (writeIdx === DATA_SIZE - 1 && readIdx > 0) writeIdx = 0;
-      const available = readIdx <= writeIdx ? DATA_SIZE - writeIdx - 1 : readIdx - writeIdx - 1;
-
-      if (available === 0) {
-        await Atomics.waitAsync(this.indices, READ_IDX, readIdx).value;
-        continue;
+  private toolchain(
+    process: Process,
+    name: Toolchain,
+    args: string[],
+    options: StepOptions
+  ): Promise<number> {
+    const cwd = join(options.cwd ?? '/');
+    const env = options.env ?? {};
+    const ctx: Context<Toolchain> = {
+      args,
+      options: options as Context<Toolchain>['options'],
+      cwd,
+      env,
+      fs: this.fs,
+      process,
+      run: async (command, args, step = {}) => {
+        const stdio = { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr };
+        const child = this.spawn(stdio, process.debugger, command, args, { cwd, env, ...step });
+        const release = process.onKill(() => child.kill());
+        const { exitCode } = await child;
+        release();
+        return exitCode;
+      },
+      sysroot: async (url) => {
+        const sysroot = await this.sysroot(url);
+        return isFailure(sysroot) ? undefined : sysroot;
       }
+    };
+    return (toolchains[name] as (ctx: Context<Toolchain>) => Promise<number>)(ctx);
+  }
 
-      const toWrite = Math.min(chunk.length - offset, available);
-      this.data.set(chunk.subarray(offset, offset + toWrite), writeIdx);
+  /** Loads a sysroot in a worker (fetching and extracting it in shared memory). */
+  private sysroot(url: string): Promise<Fs | Failure> {
+    return cached(sysrootCache, url, async () => {
+      const worker = await this.pool.acquire();
+      const message = await new Promise<WorkerMessage>((resolve) => {
+        worker.worker.addEventListener('message', (e) => resolve(e.data), { once: true });
+        worker.worker.postMessage({ type: 'sysroot', url });
+      });
+      this.pool.release(worker);
+      if (message.type === 'error') throw new Error(String(message.message));
+      if (message.ptr === undefined) return [127, `network error (${message.status})`];
+      return Fs.from_ptr(message.ptr as number);
+    });
+  }
 
-      // Write index & notify reader
-      Atomics.store(this.indices, WRITE_IDX, (writeIdx + toWrite) % DATA_SIZE);
-      Atomics.notify(this.indices, WRITE_IDX);
-      offset += toWrite;
+  /** Runs a single WASI program on a worker. */
+  private async job(
+    process: Process,
+    program: { bytes?: Uint8Array; url?: string; path?: string },
+    args: string[],
+    options: StepOptions
+  ): Promise<number> {
+    const name = options.name ?? program.path ?? program.url ?? 'main';
+    const fail = ([code, message]: Failure) => (process.error(`${name}: ${message}`), code);
+    const debug = options.debug === 'python' ? 'python' : options.debug ? 'wasm' : undefined;
+
+    let sysroot: number | undefined;
+    if (options.sysroot) {
+      const loaded = await this.sysroot(sysroots[options.sysroot] ?? options.sysroot);
+      if (isFailure(loaded)) return fail(loaded);
+      sysroot = loaded.ptr();
     }
+
+    let { bytes } = program;
+    let module: WebAssembly.Module | undefined;
+    if (program.url && debug === 'wasm') {
+      // Instrumentation for debugging requires the raw binary.
+      const fetched = await fetchBytes(program.url);
+      if (isFailure(fetched)) return fail(fetched);
+      bytes = fetched;
+    } else if (program.url) {
+      const compiled = await cached(modules, program.url, async () => {
+        const fetched = await fetchBytes(program.url!);
+        if (isFailure(fetched)) return fetched;
+        return WebAssembly.compile(fetched).catch((): Failure => [126, 'cannot execute']);
+      });
+      if (isFailure(compiled)) return fail(compiled);
+      module = compiled;
+    }
+
+    const job = {
+      name,
+      module,
+      bytes,
+      path: program.path,
+      args,
+      env: Object.entries(options.env ?? {}),
+      cwd: resolve('/', options.cwd ?? '/'),
+      workspace: this.fs[Internals].ptr,
+      sysroot,
+      stdin: process.stdin.buffer,
+      debug
+    };
+
+    const worker = await this.pool.acquire();
+    return new Promise<number>((resolve, reject) => {
+      let release = () => {};
+      const done = (finish: () => void) => {
+        worker.worker.removeEventListener('message', onMessage);
+        worker.worker.removeEventListener('error', onError);
+        release();
+        finish();
+      };
+      const onMessage = ({ data }: MessageEvent<WorkerMessage>) => {
+        if (data.type === 'stdout')
+          (data.mode === 2 ? process.stderr : process.stdout).emit('data', data.data as Uint8Array);
+        else if (data.type === 'exit')
+          done(() => (this.pool.release(worker), resolve(data.code as number)));
+        else if (data.type === 'error')
+          done(() => (void this.pool.kill(worker), reject(new Error(String(data.message)))));
+        else if (debug) process.debugger?.[Internals].receive(data);
+      };
+      const onError = (e: ErrorEvent) =>
+        done(() => (void this.pool.kill(worker), reject(e.error ?? new Error(e.message))));
+      // A killed job's worker is terminated, and replaced (lazily) by a fresh one.
+      release = process.onKill(() => done(() => (void this.pool.kill(worker), resolve(137))));
+
+      worker.worker.addEventListener('message', onMessage);
+      worker.worker.addEventListener('error', onError);
+      worker.worker.postMessage({ type: 'run', job });
+    });
   }
 }
 
-export * from './debugger';
+type PythonFilter = { filterInternals?: boolean };
+
+export { Artifact, Debugger } from './debugger';
+export type {
+  Directory,
+  ExportOptions,
+  File,
+  FileContents,
+  FileStat,
+  FileTree,
+  Timestamp,
+  Timestamps
+} from './fs';
+export { Filesystem } from './fs';
+export type { ProcessResult } from './process';
+export { Process, Stdin, Stdout } from './process';
+export type {
+  BaseOptions,
+  CppOptions,
+  PythonOptions,
+  RustOptions,
+  Toolchain,
+  ToolchainOptionsMap
+} from './toolchains';

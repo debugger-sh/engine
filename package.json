@@ -15,21 +15,20 @@
     "url": "git+https://github.com/debugger-sh/engine.git"
   },
   "type": "module",
-  "main": "./dist/debugger-sh.umd.cjs",
+  "main": "./dist/debugger-sh.js",
   "module": "./dist/debugger-sh.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/debugger-sh.js",
-      "require": "./dist/debugger-sh.umd.cjs"
+      "import": "./dist/debugger-sh.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build:rs": "wasm-pack build --target web",
+    "build:rs": "CARGO_UNSTABLE_BUILD_STD=std,panic_abort wasm-pack build --target web",
     "build:ts": "vite build",
     "build": "npm run build:rs && npm run build:ts",
     "build:release": "WASM_RELEASE=1 npm run build",

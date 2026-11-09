@@ -1,8 +1,7 @@
 import EventEmitter from 'events';
 
-/* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-import { type Engine } from '.';
-import { DapAdapter, WorkerOut } from '../../pkg/engine';
+import { DapAdapter } from '../../pkg/engine';
+import type { WorkerMessage } from './process';
 import { Internals } from './util';
 
 type DebuggerEventMap = {
@@ -33,6 +32,11 @@ export class Artifact {
   }
 }
 
+/**
+ * A Debug Adapter Protocol (DAP) debugger, tied to one process.
+ *
+ * The process only makes progress once the DAP handshake (`configurationDone`) completes.
+ */
 export class Debugger extends EventEmitter<DebuggerEventMap> {
   /**
    * Access to internal properties of the debugger.
@@ -40,54 +44,31 @@ export class Debugger extends EventEmitter<DebuggerEventMap> {
    * clients of the library.
    */
   [Internals]: {
-    attach(worker: Worker): void;
+    /** Receives a message from the worker running the debuggee. */
+    receive(message: WorkerMessage): void;
   };
 
-  private readonly dap: DapAdapter;
+  private readonly dap = new DapAdapter();
 
-  /**
-   * Whether or not debugging is enabled.
-   * Changes will takes effect during the next call to {@link Engine.run}.
-   */
-  public enabled: boolean = true;
-
-  /**
-   * When true, internal frames (bdb, bridge) are omitted from DAP `stackTrace`
-   * responses. Internal frames are always tagged with `presentationHint: "subtle"`
-   * regardless, so raw clients can filter themselves.
-   * Must be set before calling {@link Engine.run}.
-   */
-  public set filterInternals(value: boolean) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (this.dap as any).setFilterInternals(value);
-  }
-
-  constructor() {
+  /** @param filterInternals Omit internal (bridge) frames from Python stack traces. */
+  constructor(filterInternals = false) {
     super();
+    this.dap.setFilterInternals(filterInternals);
+    this.dap.on((message: unknown) => this.emit('event', message));
     this[Internals] = {
-      attach: this.attach.bind(this)
+      receive: (message) => {
+        if (message.type === 'artifact')
+          this.emit(
+            'artifact',
+            new Artifact(message.name as string, new Uint8Array(message.data as Uint8Array))
+          );
+        else this.dap.receive(message);
+      }
     };
-
-    this.onMessage = this.onMessage.bind(this);
-    this.dap = new DapAdapter();
-    this.dap.on(this.onMessage);
   }
 
+  /** Sends a DAP request, synchronously returning its response. Events are emitted via `on('event')`. */
   public send(message: unknown): unknown {
-    // return the response from the DAP adapter. This is sync. DAP events are async and emitted through the on('event') listener.
     return this.dap.sendMessage(message);
-  }
-
-  private attach(worker: Worker) {
-    worker.addEventListener('message', (event: MessageEvent<WorkerOut>) => {
-      if (event.data.type !== 'artifact') return;
-      const artifact = new Artifact(event.data.name, new Uint8Array(event.data.data));
-      this.emit('artifact', artifact);
-    });
-    this.dap.attach(worker);
-  }
-
-  private onMessage(message: unknown) {
-    this.emit('event', message);
   }
 }

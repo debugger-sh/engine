@@ -7,15 +7,18 @@ use std::{
 use wasmer_wasix::virtual_fs::{AsyncRead, AsyncSeek, AsyncWrite, FsError, Result, VirtualFile};
 
 use crate::types::{StdoutMode, WorkerOut};
+use crate::util::weak_error;
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Stdin                                                                    │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-// Must match TypeScript StdinStream constants
-const HEADER_SIZE: u32 = 8;
+// Must match the TypeScript `Stdin` layout: [read index, write index, sequence, closed].
+const HEADER_SIZE: u32 = 16;
 const READ_IDX: u32 = 0;
 const WRITE_IDX: u32 = 1;
+const SEQ_IDX: u32 = 2;
+const CLOSED_IDX: u32 = 3;
 
 #[derive(Debug)]
 pub struct Stdin {
@@ -28,17 +31,13 @@ unsafe impl Sync for Stdin {}
 
 impl Stdin {
     pub fn new(stdin_buffer: &js_sys::SharedArrayBuffer) -> Self {
-        // Create typed array views over the SharedArrayBuffer
-        let indices = js_sys::Int32Array::new_with_byte_offset_and_length(
-            stdin_buffer,
-            0,
-            2, // 2 i32s: read_index and write_index
-        );
-        let data = js_sys::Uint8Array::new_with_byte_offset(
-            stdin_buffer,
-            HEADER_SIZE
-        );
+        let indices = js_sys::Int32Array::new_with_byte_offset_and_length(stdin_buffer, 0, 4);
+        let data = js_sys::Uint8Array::new_with_byte_offset(stdin_buffer, HEADER_SIZE);
         Self { indices, data }
+    }
+
+    fn load(&self, index: u32) -> u32 {
+        js_sys::Atomics::load(&self.indices, index).expect("Loaded stdin index") as u32
     }
 }
 
@@ -72,10 +71,18 @@ impl AsyncRead for Stdin {
         _cx: &mut Context<'_>,
         buf: &mut wasmer_wasix::virtual_fs::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        let read_idx =
-            js_sys::Atomics::load(&self.indices, READ_IDX).expect("Loaded read_idx") as u32;
-        let write_idx =
-            js_sys::Atomics::load(&self.indices, WRITE_IDX).expect("Loaded write_idx") as u32;
+        let (read_idx, write_idx) = loop {
+            // Load the sequence number first so that no write (or close) is missed.
+            let seq = self.load(SEQ_IDX);
+            let (read_idx, write_idx) = (self.load(READ_IDX), self.load(WRITE_IDX));
+            if read_idx != write_idx {
+                break (read_idx, write_idx);
+            }
+            if self.load(CLOSED_IDX) != 0 {
+                return Poll::Ready(Ok(())); // EOF
+            }
+            weak_error!(js_sys::Atomics::wait(&self.indices, SEQ_IDX, seq as i32));
+        };
 
         // Contiguous bytes available before the buffer wraps.
         let available = if read_idx <= write_idx {
@@ -84,24 +91,15 @@ impl AsyncRead for Stdin {
             self.data.length() - read_idx
         };
 
-        if available == 0 {
-            // Wait on the write index
-            js_sys::Atomics::wait(&self.indices, WRITE_IDX, write_idx as i32)
-                .expect("Waited on write_idx");
-            return self.poll_read(_cx, buf);
-        }
-
         // Read contiguous chunk only
         let to_read = std::cmp::min(available, buf.remaining() as u32);
         let slice = self.data.slice(read_idx, read_idx + to_read);
         buf.put_slice(slice.to_vec().as_slice());
 
-        // Update read index atomically
+        // Update read index atomically and notify TypeScript that we consumed data
         let new_read_idx = (read_idx + to_read) % self.data.length();
         js_sys::Atomics::store(&self.indices, READ_IDX, new_read_idx as i32)
             .expect("Stored new read_idx");
-
-        // Notify TypeScript that we consumed data
         js_sys::Atomics::notify(&self.indices, READ_IDX).expect("Notified main thread");
 
         Poll::Ready(Ok(()))
@@ -183,11 +181,9 @@ impl AsyncWrite for Stdout {
         _cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        WorkerOut::Stdout {
-            data: buf,
-            mode: self.mode,
+        if !buf.is_empty() {
+            WorkerOut::Stdout { data: buf, mode: self.mode }.send();
         }
-        .send();
         Poll::Ready(Ok(buf.len()))
     }
 
