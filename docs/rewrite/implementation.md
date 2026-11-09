@@ -36,6 +36,10 @@ The filesystem must be shared in-memory with zero-copy access. Please study the 
 
 The filesystem JS API is purposefully `async` to avoid operations that would stall the main thread. In particular, if the main thread issues a filesystem operation, it should not block while waiting for another thread to finish. Instead of using a stalling busy-wait loop, an `async` spin-yield loop could be used.
 
+### Import/export implementation
+
+Importing and exporting file systems may involve reading/writing tarballs or zipped archives. Ideally, we would like to depend on an external library for this purpose, rather than implementing it ourselves. This is also true for handling imported sysroots in other parts of the library.
+
 ### Handling sysroots
 
 Currently, the library unions the serialized user filesystem snapshot with the downloaded sysroot. This approach will not work with the new shared filesystem. During execution of a command, the sysroot should be treated as an overlay filesystem, so that the sysroot contents are visible locally to the executing toolchain but not to the outside world. Essentially, this looks like:

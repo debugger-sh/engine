@@ -33,28 +33,142 @@ engine.dispose();
 
 The new engine filesystem is a shared, in-memory filesystem. Whereas the previous filesystem was a simple object that was serialized and sent to the worker, the new filesystem is shared simultaneously by all concurrent processes, such that both the processes and the main thread can simultaneously modify the filesystem and observe the results immediately.
 
-### Mounting
+### Mounting a filesystem
 
-To quickly populate the contents of a filesystem, we can mount it. This provides, among other things, the same interface as the previous version of the library.
+To quickly populate the contents of a filesystem, we can use `mount`.
 
 ```ts
-await engine.fs.mount('/', {
-  'main.cpp': '#include <stdio>',
+await engine.fs.mount({
+  'main.cpp': {
+    contents: '#include <stdio>',
+    created: '2026-11-01T09:00:00Z',
+    modified: '2026-11-09T12:00:00Z'
+  },
+  'uti.h': '#include <string>',
   data: {
-    'res.txt': 'Jacob\nFabio\nYousef'
+    created: '2026-11-01T09:05:00Z',
+    files: {
+      'res.txt': 'Jacob\nFabio\nYousef'
+    }
   }
 });
 ```
 
-`mount` provides an overload that allows us to specify the location of the mount point (which defaults to `"/"`):
+`mount` provides an optional argument that allows us to specify the location of the mount point (it defaults to `"/"`):
 
 ```ts
 // These two calls are identical
 await engine.fs.mount(/* Filesystem */);
-await engine.fs.mount('/' /* Filesystem */);
+await engine.fs.mount(/* Filesystem */, { at: "/" });
 ```
 
-`mount` additively injects files (it never removes files which already exist).
+`mount` additively injects files (it never removes files which already exist). If `mount` includes a file which conflicts with an existing one, `mount` overrides it.
+
+`mount` supports simple file trees, tarballs, zips, and URLs. The full TypeScript interface is shown below:
+
+```ts
+/**
+ * A file timestamp. Either an ISO 8601 string, a Date, or a milliseconds epoch.
+ */
+type Timestamp = string | Date | number;
+
+/**
+ * The timestamps of a file or directory.
+ *
+ * If a timestamp is not specified, it defaults to the current time.
+ */
+type Timestamps = {
+  accessed?: string; // ISO 8601
+  modified?: string;
+  created?: string;
+};
+
+/**
+ * The contents of a file, either as bytes or a UTF-8 encoded string
+ */
+type FileContents = Uint8Array | string;
+
+/**
+ * A representation of a file, either as its contents or as its contents and metadata.
+ *
+ * `encoding` determines the encoding of string-valued `contents`, and defaults to `utf8`.
+ */
+type File = FileContents | (Timestamps & { contents: FileContents, encoding?: 'base64' | 'utf8' });
+
+/**
+ * A representation of a directory.
+ */
+type Directory = Timestamps & { files: FileTree };
+
+/**
+ * A tree of files in the filesystem.
+ */
+type FileTree = { [name: string]: File | Directory };
+
+/**
+ * Unions a representation of a filesystem into this one.
+ *
+ * `fs` can be a:
+ *
+ *  1. FileTree:    a simple representation of a filesystem to be unioned.
+ *  2. Uint8Array:  the bytes of a tarball (.tar.gz) or zip to be unioned.
+ *  2. string:      a URL to a tarball or zip to be fetched and unioned.
+ *
+ * `at` can be specified to optionally determine the root folder in the filesystem
+ * whose contents will be unioned.
+ */
+fs.mount(fs: FileTree | Uint8Array | string, options?: { at?: string }): Promise<void>;
+```
+
+### Exporting a filesystem
+
+A filesystem can also be exported to produce the same shape expected by `mount`. E.g.
+
+```ts
+// a FileTree
+const tree = await engine.fs.export();
+
+// a .tar.gz file (Uint8Array)
+const tarball = await engine.fs.export({ format: 'tar' });
+
+// the contents of the `build` folder as a zip archive (Uint8Array)
+const buildZip = await engine.fs.export({ at: '/build', format: 'zip' });
+```
+
+The full TypeScript interface for `export` is shown below:
+
+```ts
+type ExportOptions = {
+  /**
+   * The format to export to. Defaults to "tree"
+   *
+   * If `tree` is selected, the exported object is JSON and includes maximal information
+   * (binary files encoded as base-64 strings, timestamps included).
+   */
+  format?: "zip" | "tarball" | "tree";
+
+  /** The directory to be exported. Defaults to "/" */
+  at?: string;
+
+  /**
+   * Glob patterns to include in the export, evaluated relative to `at`.
+   *
+   * Defaults to all files (["**\*"])
+   */
+  include?: string[];
+
+    /**
+   * Glob patterns to exclude in the export, evaluated relative to `at`.
+   *
+   * Defaults to no files ([])
+   */
+  exclude?: string[];
+}
+
+fs.export(options?: undefined): Promise<FileTree>;
+fs.export(options: ExportOptions & { format: "zip" | "tarball" }): Promise<Uint8Array>;
+fs.export(options: ExportOptions & { format: "tree" }): Promise<FileTree>;
+```
 
 ### File I/O
 
@@ -88,17 +202,16 @@ The following other file operations are supported:
 interface FileStat {
   kind: "file" | "directory";
   size: number;
-}
-
-interface DirectoryEntry extends FileStat {
-  name: string;
+  modified: number;
+  accessed: number;
+  created: number;
 }
 
 mkdir(path: string, options?: { recursive?: boolean }): Promise<void>;
 remove(path: string, options?: { recursive?: boolean }): Promise<void>;
 rename(from: string, to: string): Promise<void>;
 stat(path: string): Promise<FileStat>;
-readDir(path: string): Promise<DirectoryEntry[]>;
+readDir(path: string): Promise<string[]>; // List of file names
 ```
 
 ### Support for relative paths
@@ -197,7 +310,7 @@ interface BaseOptions {
    *
    * This can be either a toolchain (like "cpp" or "python"), in which case the
    * default sysroot for that toolchain will be used, or a URL to a tarball (.tar.gz)
-   * to be downloaded as the sysroot.
+   * or zip archive (.zip) to be downloaded as the sysroot.
    *
    * By default, when running a toolchain, the toolchain sysroot is used.
    */
