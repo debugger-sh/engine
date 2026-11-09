@@ -2,7 +2,7 @@
 
 We would like to rewrite the library to have a more ergonomic interface. This document serves to explain the new interface; implementation can be described in another document.
 
-## Initialization
+## Lifecycle
 
 The engine represents a workspace which can be shared by concurrent processes which operate on it.
 
@@ -16,6 +16,17 @@ The engine represents a workspace which can be shared by concurrent processes wh
  * of the engine.
  */
 const engine = await Engine.create();
+```
+
+Once finished, the caller should `dispose` of the engine to release any resources it holds.
+
+```ts
+/**
+ * Kills any running processes and releasing any memory the engine holds on to.
+ *
+ * After calling this method, further attempts to interact with the engine will throw an error.
+ */
+engine.dispose();
 ```
 
 ## Filesystem
