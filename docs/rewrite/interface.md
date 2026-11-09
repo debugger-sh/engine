@@ -186,6 +186,20 @@ interface BaseOptions {
   env?: Record<string, string>;
 
   /**
+   * The sysroot to use while running this command.
+   *
+   * Sysroots are default filesystems that are invisibly unioned into the
+   * main filesystem before running the command, and are only visible to this command.
+   *
+   * This can be either a toolchain (like "cpp" or "python"), in which case the
+   * default sysroot for that toolchain will be used, or a URL to a tarball to use
+   * as the sysroot.
+   *
+   * By default, when running a toolchain, the toolchain sysroot is used.
+   */
+  sysroot?: Toolchain | string;
+
+  /**
    * Whether to allow debugging this process.
    *
    * Defaults to `false`. If `false`, `proc.debugger` is `undefined`.
@@ -390,9 +404,13 @@ For C/C++ and Rust, object files should be built into the `buildDir` specified i
 `run("cpp")` and `run("rust")` can be thought of as mini-build systems that do the barebones needed to compile, link and run a piece of code. However, users who want to engineer their own build systems should have the ability to run the individual steps as well. For instance, a user should be able to compile, link, and run a file like so:
 
 ```ts
-await engine.run('clang++', [
-  /* compiler args */
-]);
+await engine.run(
+  'clang++',
+  [
+    /* compiler args */
+  ],
+  { sysroot: 'cpp' }
+);
 
 // Could also have done:
 //
@@ -400,11 +418,14 @@ await engine.run('clang++', [
 //  await engine.run("rustc", [/* compiler args */]);
 //
 
-await engine.run('lld', [/* compiler args */ '-o', '/main']);
+await engine.run('lld', [/* compiler args */ '-o', '/main'], { sysroot: 'cpp' });
 await engine.run('/main');
 ```
 
-This is treated as a hardcoded list of supported commands:
+> Note that the `sysroot` option would need to be supplied to configure a sysroot to
+> use for each command (or the user could configure the sysroot manually).
+
+As a result, `run` has a hardcoded list of supported commands:
 
 - **`cpp`**: A simple C++ toolchain and build system which compiles, links, runs, and optionally debugs C++ programs according to `CppOptions`.
 - **`rust`**: A simple Rust toolchain which compiles, links, runs, and optionally debugs Rust programs according to `RustOptions`.
