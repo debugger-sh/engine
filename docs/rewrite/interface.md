@@ -152,7 +152,7 @@ interface BaseOptions {
   /**
    * Whether to allow debugging this process.
    *
-   * Defaults to `false`. If `false`, accesses to `process.debugger` will no-op.
+   * Defaults to `false`. If `false`, accesses to `proc.debugger` will no-op.
    */
   debug?: boolean;
 }
@@ -165,7 +165,7 @@ interface PythonOptions {
   filterInternals?: boolean;
 
   /**
-   * Whether to run an interactive REPL. Only applies when no `args` are given.
+   * Whether to run an interactive REPL when no `args` are given.
    *
    * Defaults to `false`.
    */
@@ -250,13 +250,13 @@ If `args` are given, they are forwarded perfectly to the `python` binary. Otherw
 
 ### Waiting for a process to complete
 
-Processes inherit from `Promise<ProcessResult>`, so they can be awaited just like a promise and return a `ProcessResult`.
+Processes are thenable and implement `then` so they can be awaited like a promise and return a `ProcessResult`.
 
 ```ts
 const result = await engine.run('cpp');
 console.log(result); // { exitCode: 0, killed: false }
 
-class ProcessResult {
+interface ProcessResult {
   /**
    * The exit code of the process.
    *
@@ -272,19 +272,32 @@ class ProcessResult {
 }
 ```
 
-Notice that under ordinary circumstances, processes do not trigger exceptions during their lifecycle. The only time that awaiting a process would trigger an exception is through an unexpected library error.
-
 A process can be killed at any time via the `kill()` method. This causes anyone awaiting the process to immediately wake up with a `killed` process result, and functions similarly to the existing `stop()` method:
 
 ```ts
-const process = engine.run('cpp');
+const proc = engine.run('cpp');
 
 /* Some time passes... */
 
-process.kill();
+proc.kill();
 ```
 
 If a process is killed, the resulting exit code will be 137 to mirror the Unix style `SIGKILL` exit code.
+
+### Error handling
+
+Under ordinary circumstances, processes do not trigger exceptions during their lifecycle. The only time that awaiting a process would trigger an exception is through an unexpected library error.
+
+The following common errors should cause a non-zero exit code and output to `stderr`:
+
+| Error                                                   | Exit Code | `stderr`                          |
+| ------------------------------------------------------- | --------- | --------------------------------- |
+| Unknown or missing command                              | `127`     | `{cmd}: command not found`        |
+| Network error while fetching a command or its `sysroot` | `127`     | `{cmd}: network error ({status})` |
+| Invalid WASI binary or directory                        | `126`     | `{cmd}: cannot execute`           |
+| Guest WASI has an error                                 | `134`     | `{cmd}: {message}`                |
+
+If the host (library) Wasm has an error, that should cause the process promise to reject.
 
 ### Process I/O
 
@@ -298,16 +311,16 @@ Each process object provides the `stdin`, `stdout`, and `stderr` objects, which 
  * For example, a single chunk of stdin could be partially eaten by the compiler/linker;
  * the remaining portion would be passed onto the user program.
  */
-const process = engine.run('cpp');
-console.log(process.stdin.closed); // false
+const proc = engine.run('cpp');
+console.log(proc.stdin.closed); // false
 
 /** Write chunks and close stream */
-await process.stdin.write('CS198!');
-process.stdin.close();
-console.log(process.stdin.closed); // true
+await proc.stdin.write('CS198!');
+proc.stdin.close();
+console.log(proc.stdin.closed); // true
 
 /** Listen for incremental output */
-process.stdout.on('data', (chunk) => terminal.write(chunk));
+proc.stdout.on('data', (chunk) => terminal.write(chunk));
 ```
 
 ### Debugging a process
@@ -315,15 +328,15 @@ process.stdout.on('data', (chunk) => terminal.write(chunk));
 The existing debugger interface is preserved, but each call to `run` creates a new `Debugger` instance tied to that process. Ordinarily, processes will make forward progress after `run` is called; however, in the case that debugging is enabled, they will only make progress pending the completion of the DAP handshake.
 
 ```ts
-const process = engine.run('cpp', { debug: true });
+const proc = engine.run('cpp', { debug: true });
 
 /** Setup callbacks for handling DAP events */
-process.debugger.on('event', (msg) => {
+proc.debugger.on('event', (msg) => {
   /* ... */
 });
 
 /** Send DAP initialize request */
-process.debugger.send({ type: 'request', command: 'initialize' /* ... */ });
+proc.debugger.send({ type: 'request', command: 'initialize' /* ... */ });
 ```
 
 As is currently the case, the debugger for a compiler-enabled toolchain (e.g. C/C++, Rust) debugs only the execution step in a toolchain (i.e. the user's code). Access to the debugger for a process with `debug: false` will no-op.
