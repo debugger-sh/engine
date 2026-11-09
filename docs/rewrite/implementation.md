@@ -90,3 +90,7 @@ The advantage of this approach is that it requires no additional data structures
 ### Debugging
 
 Do not change the core debugging logic or code. For example, the core DWARF parsing code and instrumentation code should not fundamentally be changed.
+
+### Toolchains
+
+Right now, the library defines only three toolchains: `cpp`, `rust` and `python`. However, we may desire to add additional toolchains add a later date. As a result, the implementations of the toolchains should not be overly hardcoded or fixed to the given ones, but engineered in an extensible way.
