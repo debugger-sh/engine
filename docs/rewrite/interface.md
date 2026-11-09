@@ -114,13 +114,38 @@ This will be the most significant rewrite of the engine library. Previously, the
 Processes can be instantiated with the following overloads:
 
 ```ts
+run<C extends CommandLike>(command: C, options: CommandOptions<C> & { debug: true }): DebuggableProcess;
 run<C extends CommandLike>(command: C, options?: CommandOptions<C>): Process;
+run<C extends CommandLike>(command: C, args: string[], options: CommandOptions<C> & { debug: true }): DebuggableProcess;
 run<C extends CommandLike>(command: C, args: string[], options?: CommandOptions<C>): Process;
 ```
 
 with the following helper types:
 
 ```ts
+interface Process extends PromiseLike<ProcessResult> {
+  readonly stdin: Stdin;
+  readonly stdout: Stdout;
+  readonly stderr: Stdout;
+
+  /**
+   * The debugger for this process. Present only if `debug: true` was passed.
+   */
+  readonly debugger?: Debugger;
+
+  /**
+   * Immediately kills this process.
+   */
+  kill(): void;
+}
+
+/**
+ * A process spawned with `debug: true`.
+ */
+interface DebuggableProcess extends Process {
+  readonly debugger: Debugger;
+}
+
 /**
  * A command to run. This will be interpreted as either a language toolchain name or
  * a WASI executable (either raw bytes, a URL to fetch, or a path within the workspace).
@@ -163,7 +188,7 @@ interface BaseOptions {
   /**
    * Whether to allow debugging this process.
    *
-   * Defaults to `false`. If `false`, accesses to `proc.debugger` will no-op.
+   * Defaults to `false`. If `false`, `proc.debugger` is `undefined`.
    */
   debug?: boolean;
 }
@@ -341,9 +366,6 @@ The existing debugger interface is preserved, but each call to `run` creates a n
 ```ts
 const proc = engine.run('cpp', { debug: true });
 
-/** See if a process supports debugging (if it was spawned with `debug: true`) */
-console.log(proc.debugger.enabled); // true
-
 /** Setup callbacks for handling DAP events */
 proc.debugger.on('event', (msg) => {
   /* ... */
@@ -353,7 +375,7 @@ proc.debugger.on('event', (msg) => {
 proc.debugger.send({ type: 'request', command: 'initialize' /* ... */ });
 ```
 
-As is currently the case, the debugger for a compiler-enabled toolchain (e.g. C/C++, Rust) debugs only the execution step in a toolchain (i.e. the user's code). Access to the debugger for a process with `debug: false` will no-op.
+As is currently the case, the debugger for a compiler-enabled toolchain (e.g. C/C++, Rust) debugs only the execution step in a toolchain (i.e. the user's code). For a process without `debug: true`, `proc.debugger` is `undefined`.
 
 If `debug: true` is enabled for a non-toolchain command (e.g. an arbitrary WASI executable), debugging will proceed as if the executable had been produced by a compiler toolchain. That is, these executables will be debugged via DWARF inspection and WASM instrumentation. Assume that the provided executable has debug info, i.e. the DWARF exists in the same location in the binary as if it were produced by a compiler/linker toolchain.
 
