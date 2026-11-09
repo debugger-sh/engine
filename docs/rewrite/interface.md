@@ -103,7 +103,9 @@ readDir(path: string): Promise<DirectoryEntry[]>;
 
 ### Support for relative paths
 
-The old version of this library may not have supported relative paths. For example, trying to read from `data.txt` may have thrown an error. The library should treat relative paths as relative to the root folder of the engine, such that `data.txt` and `/data.txt` refer to the same file.
+The old version of this library may not have supported relative paths. For example, trying to read from `data.txt` may have thrown an error. The new version should support such paths.
+
+This is true for all filesystem operations, whether inside the guest program or in the main thread JS API. The JS API should treat relative paths as relative to the root folder of the engine, such that `data.txt` and `/data.txt` refer to the same file. Guest programs should treat relative paths as relative to their `cwd`.
 
 ## Processes
 
@@ -175,7 +177,9 @@ interface ToolchainOptionsMap {
 
 interface BaseOptions {
   /**
-   * Absolute path to a directory to run this command from.
+   * Absolute or relative path to a directory to run this command from.
+   *
+   * Relative paths are treated as relative to "/".
    */
   cwd?: string;
 

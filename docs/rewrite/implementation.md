@@ -6,7 +6,7 @@ As a general principle, the three priorities of the rewrite are:
 
 - **Simplicity.** Implementations should not be more complex than they need to be. Elegant, simple solutions that ignore rare edge cases are preferred to complex ones that address every edge case.
 - **Speed.** The ability to compile, execute, and debug files quickly is a core aim of the library. Implementations should be done in a way that respects that. For example, true in-memory sharing of files is preferred to an RPC style approach that would introduce latency.
-- **Correctness.** The library must be bug-free. In practice, this means that we must have a comprehensive suite of test cases that check the correctness of the implementation. Each component of the interface must have a small unit test which verifies its correctness.
+- **Correctness.** The library must be bug-free. In practice, this means that we must have a comprehensive suite of test cases that check the correctness of the implementation.
 
 During implementation, study the [Wasmer WASI SDK](https://github.com/wasmerio/wasmer-sdk) and [Wasmer](https://github.com/wasmerio/wasmer) repositories. Clone them locally if they are not already available. These should be treated as high quality reference sources from which you can gain information about how to write quality Rust code, how to set up shared in-memory filesystems, and how to interface with the existing Wasmer code.
 
@@ -32,7 +32,9 @@ console.log(output.text());
 
 In their case, `sandbox` is analogous to our `engine`. In Wasmer, only the `/workspace` folder is shared, whereas in our case, the whole root directory will be shared across processes. Consider cloning this repository and digging around to see what parts can be borrowed for the new implementation.
 
-The filesystem must be shared in-memory with zero-copy access. Please study the `wasmer-sdk` source to understand how this should be done, since it has effectively solves this problem. Please do not re-implement the filesystem operations e.g. on top of a `SharedArrayBuffer`; use the functionality that the Wasmer Rust crate already provides while adhering to the rest of this document and the interface guidelines. The library may not depend on the `@wasmer/sdk`: it must borrow this functionality from the `wasmer` crate (not the SDK) or implement it on its own.
+The filesystem must be shared in-memory with zero-copy access. Please study the `wasmer-sdk` source to understand how this should be done, since this library has effectively already solved this problem. Please do not re-implement the filesystem operations e.g. on top of a `SharedArrayBuffer`; use the functionality that the Wasmer Rust crate already provides while adhering to the rest of this document and the interface guidelines. The library may not depend on the `@wasmer/sdk`: it must borrow this functionality from the `wasmer` crate (not the SDK) or implement it on its own.
+
+The filesystem JS API is purposefully `async` to avoid operations that would stall the main thread. In particular, if the main thread issues a filesystem operation, it should not block while waiting for another thread to finish. Instead of using a stalling busy-wait loop, an `async` spin-yield loop could be used.
 
 ### Handling sysroots
 
@@ -62,7 +64,7 @@ To be clear, this only needs to be done when fetching modules from the web. Dyna
 
 ### Sysroot Caching
 
-It should be possible to avoid downloading/loading the same toolchain sysroot more than once. We should, at the very least, avoid re-downloading by employing `force-cache` as described above. If we are able to represent sysroots as a secondary mount in the Wasmer overlay filesystem, then there should be a creative way to re-use a sysroot that has already been created and mount it into the overlay filesystem. Ideally, sysroot initialization becomes a zero-copy operation.
+It should be possible to avoid downloading/loading the same toolchain sysroot more than once. We should, at the very least, avoid re-downloading by employing `force-cache` as described above. If we are able to represent sysroots as a secondary mount in the Wasmer overlay filesystem, then there should be a creative way to re-use a sysroot that has already been created and mount it into the overlay filesystem. Ideally, sysroot initialization becomes a zero-copy operation. Furthermore, sysroot fetching should be done in-process to avoid having to serialize and copy bytes (e.g. via `postMessage`) to send over the wire.
 
 ### Parallel Compilation
 
@@ -94,3 +96,14 @@ Do not change the core debugging logic or code. For example, the core DWARF pars
 ### Toolchains
 
 Right now, the library defines only three toolchains: `cpp`, `rust` and `python`. However, we may desire to add additional toolchains add a later date. As a result, the implementations of the toolchains should not be overly hardcoded or fixed to the given ones, but engineered in an extensible way.
+
+As mini build systems, it would be nice if a toolchain's logic involves orchestrating a series of `engine.run` calls. For example, calling `engine.run("cpp")` invokes `engine.run("clang")` on any sources needing compilation, then `engine.run("lld")`, and finally `engine.run("/build/main")`, with the returned process representing the completion of all orchestrated spawned inner processes.
+
+## Testing
+
+Each component of the interface must have a small unit test which verifies its correctness. In particular, organize the tests in the project like so:
+
+1. **`tests/bun`:** Tests which run the library headlessly inside of `bun`.
+2. **`tests/browser`:** Tests which run the library inside of a browser using e.g. Playwright.
+
+Each test should be extremely simple but test a core part of the specification defined by the rewrite. By having a large number of simple tests, we increase the likelihood that the implementation is correct. These tests should simple enough that they are self-explaining. An implementation is not correct unless all tests pass.
