@@ -4,11 +4,11 @@ This document serves to flesh out implementation decisions as part of the librar
 
 As a general principle, the three priorities of the rewrite are:
 
-- **Simplicity.** Implementations should not be more complex than they need to be. Elegant, simple solutions that ignore rare edge cases are preferred to complex ones that address every edge case.
-- **Speed.** The ability to compile, execute, and debug files quickly is a core aim of the library. Implementations should be done in a way that respects that. For example, true in-memory sharing of files is preferred to an RPC style approach that would introduce latency.
+- **Simplicity.** Implementations should not be more complex than they need to be. Elegant, simple solutions that ignore rare edge cases are preferred to complex ones that address every edge case. Implement the most direct solution that works. A corollary of this is: be exacting in your organization of the project, and do not create additional files/helper functions/machinery than necessary.
+- **Speed.** The ability to compile, execute, and debug files quickly is a core aim of the library. The implementation should respect that. For example, true in-memory sharing of files is preferred to an RPC style approach that would introduce latency.
 - **Correctness.** The library must be bug-free. In practice, this means that we must have a comprehensive suite of test cases that check the correctness of the implementation.
 
-During implementation, study the [Wasmer WASI SDK](https://github.com/wasmerio/wasmer-sdk) and [Wasmer](https://github.com/wasmerio/wasmer) repositories. Clone them locally if they are not already available. These should be treated as high quality reference sources from which you can gain information about how to write quality Rust code, how to set up shared in-memory filesystems, and how to interface with the existing Wasmer code.
+During implementation, study the [Wasmer WASI SDK](https://github.com/wasmerio/wasmer-sdk) and [Wasmer](https://github.com/wasmerio/wasmer) repositories. Clone them locally if they are not already available. These should be treated as high quality reference sources from which you can gain information about how to write quality Rust code, how to set up shared in-memory filesystems, and how to interface with the existing Wasmer code, among other things.
 
 ## Filesystem
 
@@ -36,9 +36,9 @@ The filesystem must be shared in-memory with zero-copy access. Please study the 
 
 The filesystem JS API is purposefully `async` to avoid operations that would stall the main thread. In particular, if the main thread issues a filesystem operation, it should not block while waiting for another thread to finish. Instead of using a stalling busy-wait loop, an `async` spin-yield loop could be used.
 
-### Import/export implementation
+### Mount/export implementation
 
-Importing and exporting file systems may involve reading/writing tarballs or zipped archives. Ideally, we would like to depend on an external library for this purpose, rather than implementing it ourselves. This is also true for handling imported sysroots in other parts of the library.
+Mounting and exporting file systems may involve reading/writing tarballs or zipped archives. Ideally, we would like to depend on an external library for this purpose, rather than implementing it ourselves. This is also true for handling imported sysroots in other parts of the library.
 
 ### Handling sysroots
 
@@ -95,7 +95,7 @@ The advantage of this approach is that it requires no additional data structures
 
 ### Debugging
 
-Do not change the core debugging logic or code. For example, the core DWARF parsing code and instrumentation code should not fundamentally be changed.
+Do not change the core debugging logic or code. For example, the core DWARF parsing code and instrumentation code should not fundamentally be changed. Some very slight modifications may be necessary e.g. to allow debugging arbitrary `python` entrypoints.
 
 ### Toolchains
 
