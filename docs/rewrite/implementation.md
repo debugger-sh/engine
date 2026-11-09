@@ -32,7 +32,7 @@ console.log(output.text());
 
 In their case, `sandbox` is analogous to our `engine`. In Wasmer, only the `/workspace` folder is shared, whereas in our case, the whole root directory will be shared across processes. Consider cloning this repository and digging around to see what parts can be borrowed for the new implementation.
 
-The filesystem must be shared in-memory with zero-copy access. The filesystem should live in Rust (for example, it could live inside the engine wasm's shared memory). Please do not re-implement the filesystem operations e.g. on top of a `SharedArrayBuffer`; use the functionality that Wasmer already provides while adhering to the rest of this document and the interface guidelines. The library may not depend on the `@wasmer/sdk`: it must implement this functionality from scratch.
+The filesystem must be shared in-memory with zero-copy access. Please study the `wasmer-sdk` source to understand how this should be done, since it has effectively solves this problem. Please do not re-implement the filesystem operations e.g. on top of a `SharedArrayBuffer`; use the functionality that the Wasmer Rust crate already provides while adhering to the rest of this document and the interface guidelines. The library may not depend on the `@wasmer/sdk`: it must borrow this functionality from the `wasmer` crate (not the SDK) or implement it on its own.
 
 ### Handling sysroots
 
@@ -45,7 +45,7 @@ OverlayFileSystem::new(
 )
 ```
 
-Note that the sysroots should **not** be visible to or written into the main filesystem.
+Note that the sysroots should **not** be visible to or written into the main filesystem. Note that `OverlayFileSystem` might copy files on write or create marker files on rename: this behaviour is expected and acceptible since toolchains will rarely modify their sysroots. When in doubt, just trust whatever the `OverlayFileSystem` does (ideally, no additional logic will be necessary).
 
 ## Toolchain Optimizations
 
@@ -74,10 +74,10 @@ Note: you should not implement subprocess support in the Wasmer sense (i.e. supp
 
 > Only implement this optimization for the `cpp` toolchain.
 
-Implement simple compilation caching using compiler-emitted dependency files (e.g. `/build/main.cpp.d`) and file hashes. In particular, only recompile a source if it is stale. A source is stale when its object file or `.d` file is missing, or when the source or any header listed in its `.d` file is missing or has a file hash different from when it was last compiled. To keep track of file hashes, extend the compiler's `.d` file with information about the file hashes, such that a e.g. `main.cpp.d` might look like:
+Implement simple compilation caching using compiler-emitted (`-MMD`) dependency files (e.g. `/build/main.cpp.d`) and file hashes. In particular, only recompile a source if it is stale. A source is stale when its object file or `.d` file is missing, or when the source or any header listed in its `.d` file is missing or has a file hash different from when it was last compiled. To keep track of file hashes, extend the compiler's `.d` file with information about the file hashes, such that a e.g. `main.cpp.d` might look like:
 
 ```Makefile
-main.o: main.c util.h config.h
+main.cpp.o: main.c util.h config.h
 main.c: {hash of main.c}
 util.h: {hash of util.h}
 config.h: {hash of config.h}

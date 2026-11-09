@@ -18,11 +18,11 @@ The engine represents a workspace which can be shared by concurrent processes wh
 const engine = await Engine.create();
 ```
 
-Once finished, the caller should `dispose` of the engine to release any resources it holds.
+Once finished, the caller should `dispose` of the engine to release any resources it holds. This causes any running processes to be killed and any waiters to resolve, just like `proc.kill()`.
 
 ```ts
 /**
- * Kills any running processes and releasing any memory the engine holds on to.
+ * Kills any running processes and releases any memory the engine holds on to.
  *
  * After calling this method, further attempts to interact with the engine will throw an error.
  */
@@ -192,12 +192,12 @@ interface BaseOptions {
    * main filesystem before running the command, and are only visible to this command.
    *
    * This can be either a toolchain (like "cpp" or "python"), in which case the
-   * default sysroot for that toolchain will be used, or a URL to a tarball to use
-   * as the sysroot.
+   * default sysroot for that toolchain will be used, or a URL to a tarball (.tar.gz)
+   * to be downloaded as the sysroot.
    *
    * By default, when running a toolchain, the toolchain sysroot is used.
    */
-  sysroot?: Toolchain | string;
+  sysroot?: Toolchain | (string & {});
 
   /**
    * Whether to allow debugging this process.
@@ -277,10 +277,10 @@ Note: processes begin to run as soon as they are instantiated (with a caveat for
 To avoid ambiguity, treat `command` as:
 
 1. A WASI executable to be downloaded if it is a URL (starts with `http://` or `https://`).
-2. A WASI executable to be loaded from the filesystem if it is an absolute path (e.g. `/main`).
+2. A WASI executable to be loaded from the filesystem if it is an absolute path (e.g. `/main`) or `.`-prefixed relative path (e.g. `./main`).
 3. A toolchain or built-in command, if any (e.g. `clang++` or `python`).
 
-Note that there is no ambiguity between (2) and (3): (2) requires an absolute path for an executable to be loaded from the filesystem.
+Note that there is no ambiguity between (2) and (3): (2) requires an absolute path or `.` path for an executable to be loaded from the filesystem.
 
 #### Argument semantics
 
@@ -296,7 +296,7 @@ Same behaviour as `cpp`.
 
 ##### `python`
 
-If `args` are given, they are forwarded perfectly to the `python` binary. Otherwise, the first Python file found under `cwd` is run, or the process exits with a non-zero exit code if none is found. If `repl: true` is set (and no `args` are given), an interactive REPL is run instead.
+If `args` are given, they are forwarded perfectly to the `python` binary. Otherwise, the first (alphabetical) Python file found under `cwd` is run, or the process exits with a non-zero exit code if none is found. If `repl: true` is set (and no `args` are given), an interactive REPL is run instead.
 
 ### Waiting for a process to complete
 
