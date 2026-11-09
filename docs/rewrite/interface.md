@@ -330,6 +330,9 @@ The existing debugger interface is preserved, but each call to `run` creates a n
 ```ts
 const proc = engine.run('cpp', { debug: true });
 
+/** See if a process supports debugging (if it was spawned with `debug: true`) */
+console.log(proc.debugger.enabled); // true
+
 /** Setup callbacks for handling DAP events */
 proc.debugger.on('event', (msg) => {
   /* ... */
