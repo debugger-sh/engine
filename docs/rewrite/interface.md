@@ -41,12 +41,10 @@ To quickly populate the contents of a filesystem, we can use `mount`.
 await engine.fs.mount({
   'main.cpp': {
     contents: '#include <stdio>',
-    created: '2026-11-01T09:00:00Z',
     modified: '2026-11-09T12:00:00Z'
   },
   'uti.h': '#include <string>',
   data: {
-    created: '2026-11-01T09:05:00Z',
     files: {
       'res.txt': 'Jacob\nFabio\nYousef'
     }
@@ -73,14 +71,13 @@ await engine.fs.mount(/* Filesystem */, { at: "/" });
 type Timestamp = string | Date | number;
 
 /**
- * The timestamps of a file or directory.
+ * The timestamps of a file. Only files carry timestamps, and creation times cannot be set.
  *
  * If a timestamp is not specified, it defaults to the current time.
  */
 type Timestamps = {
-  accessed?: string; // ISO 8601
-  modified?: string;
-  created?: string;
+  accessed?: Timestamp;
+  modified?: Timestamp;
 };
 
 /**
@@ -98,7 +95,7 @@ type File = FileContents | (Timestamps & { contents: FileContents, encoding?: 'b
 /**
  * A representation of a directory.
  */
-type Directory = Timestamps & { files: FileTree };
+type Directory = { files: FileTree };
 
 /**
  * A tree of files in the filesystem.
@@ -143,7 +140,7 @@ type ExportOptions = {
    * The format to export to. Defaults to "tree"
    *
    * If `tree` is selected, the exported object is JSON and includes maximal information
-   * (binary files encoded as base-64 strings, timestamps included).
+   * (binary files encoded as base-64 strings, file timestamps included).
    */
   format?: "zip" | "tarball" | "tree";
 

@@ -4,15 +4,10 @@ import { Internals, join, locked } from './util';
 /** A file timestamp. Either an ISO 8601 string, a Date, or a milliseconds epoch. */
 export type Timestamp = string | Date | number;
 
-/**
- * The timestamps of a file or directory. Unspecified timestamps default to the current time.
- *
- * Note: only the `modified` and `accessed` timestamps of files can be set when mounting.
- */
+/** The timestamps of a file. Unspecified timestamps default to the current time. */
 export type Timestamps = {
   accessed?: Timestamp;
   modified?: Timestamp;
-  created?: Timestamp;
 };
 
 /** The contents of a file, either as bytes or a UTF-8 encoded string. */
@@ -28,7 +23,7 @@ export type File =
   | (Timestamps & { contents: FileContents; encoding?: 'base64' | 'utf8' });
 
 /** A representation of a directory. */
-export type Directory = Timestamps & { files: FileTree };
+export type Directory = { files: FileTree };
 
 /** A tree of files in the filesystem. */
 export type FileTree = { [name: string]: File | Directory };
@@ -38,7 +33,7 @@ export type ExportOptions = {
    * The format to export to. Defaults to "tree".
    *
    * If `tree` is selected, the exported object is JSON and includes maximal information
-   * (binary files encoded as base-64 strings, timestamps included).
+   * (binary files encoded as base-64 strings, file timestamps included).
    */
   format?: 'zip' | 'tar' | 'tarball' | 'tree';
   /** The directory to be exported. Defaults to "/" */
@@ -145,27 +140,21 @@ export class Filesystem {
 
     return this.locked((fs) => {
       const root: Directory = { files: {} };
-      const times = (path: string) => {
-        const [, , modified, accessed, created] = fs.stat(path);
-        return { modified: iso(modified), accessed: iso(accessed), created: iso(created) };
-      };
-
       for (const entry of fs.glob(at, include, exclude)) {
         const parts = entry.replace(/\/$/, '').split('/');
         const name = parts.pop()!;
         let dir = root;
-        for (let i = 0; i < parts.length; i++) {
-          const child = (dir.files[parts[i]] ??= {
-            files: {},
-            ...times(join(at, ...parts.slice(0, i + 1)))
-          });
-          dir = child as Directory;
-        }
-        const path = join(at, entry);
+        for (const part of parts) dir = (dir.files[part] ??= { files: {} }) as Directory;
         if (entry.endsWith('/')) {
-          dir.files[name] ??= { files: {}, ...times(path) };
+          dir.files[name] ??= { files: {} };
         } else {
-          dir.files[name] = { ...encode(fs.readFile(path)), ...times(path) };
+          const path = join(at, entry);
+          const [, , modified, accessed] = fs.stat(path);
+          dir.files[name] = {
+            ...encode(fs.readFile(path)),
+            modified: iso(modified),
+            accessed: iso(accessed)
+          };
         }
       }
       return root.files;

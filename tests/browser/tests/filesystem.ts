@@ -20,7 +20,7 @@ test('exported trees can be mounted', async () => {
   expect(await fs.readFile('dir/b.bin')).toEqual(new Uint8Array([1, 255]));
 });
 
-test('export produces a tree with encodings and timestamps', async () => {
+test('export produces a tree with encodings and file timestamps', async () => {
   const modified = '2026-11-09T12:00:00.000Z';
   const { fs } = await createEngine({
     'a.txt': { contents: 'a', modified },
@@ -31,7 +31,7 @@ test('export produces a tree with encodings and timestamps', async () => {
   expect(tree['dir']).toMatchObject({
     files: { 'b.bin': { contents: btoa('\xff'), encoding: 'base64' } }
   });
-  expect(tree['dir']).toHaveProperty('created');
+  expect(tree['dir']).not.toHaveProperty('modified');
 });
 
 test('mkdir, recursively and not', async () => {
