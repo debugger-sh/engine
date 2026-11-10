@@ -9,6 +9,13 @@ import RustWorker from './worker?worker&inline';
 
 export type Lang = 'c' | 'python' | 'rust';
 
+/** Optional inputs produced by the same C++ toolchain as this engine. */
+export interface CppArtifacts {
+  sources?: string[] | null;
+  archives?: string[] | null;
+  precompiledHeader?: string | null;
+}
+
 /** Wall-clock timing for a run, in milliseconds. */
 export type Timing = {
   /** Host time including worker startup and teardown. */
@@ -55,6 +62,10 @@ export class Engine {
    * will updating it have any effect on code that is already running.
    */
   public fs: DirNode = {};
+
+  /** Optional Python/C++ binary files, addressed by absolute virtual paths. */
+  public binaryFiles: Record<string, Uint8Array> = {};
+  public cppArtifacts?: CppArtifacts;
 
   static async create(lang: Lang): Promise<Engine> {
     await init({ module_or_path: wasmBinary });
@@ -137,6 +148,8 @@ export class Engine {
 
         const message: WorkerStart = {
           fs: this.fs,
+          binary_files: this.binaryFiles,
+          cpp_artifacts: this.cppArtifacts ?? null,
           lang: this.lang,
           stdin_buffer: this.stdin[Internals].buffer,
           is_debug: this.debugger.enabled
