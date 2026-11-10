@@ -4,10 +4,15 @@ import { Internals, join, locked } from './util';
 /** A file timestamp. Either an ISO 8601 string, a Date, or a milliseconds epoch. */
 export type Timestamp = string | Date | number;
 
-/** The timestamps of a file. Unspecified timestamps default to the current time. */
+/**
+ * The timestamps of a file. Unspecified timestamps default to the current time.
+ *
+ * Note: `created` cannot be set yet, so it is ignored when mounting.
+ */
 export type Timestamps = {
   accessed?: Timestamp;
   modified?: Timestamp;
+  created?: Timestamp;
 };
 
 /** The contents of a file, either as bytes or a UTF-8 encoded string. */
@@ -149,11 +154,12 @@ export class Filesystem {
           dir.files[name] ??= { files: {} };
         } else {
           const path = join(at, entry);
-          const [, , modified, accessed] = fs.stat(path);
+          const [, , modified, accessed, created] = fs.stat(path);
           dir.files[name] = {
             ...encode(fs.readFile(path)),
             modified: iso(modified),
-            accessed: iso(accessed)
+            accessed: iso(accessed),
+            created: iso(created)
           };
         }
       }

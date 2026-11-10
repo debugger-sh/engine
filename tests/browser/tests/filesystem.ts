@@ -28,6 +28,7 @@ test('export produces a tree with encodings and file timestamps', async () => {
   });
   const tree = await fs.export();
   expect(tree['a.txt']).toMatchObject({ contents: 'a', encoding: 'utf8', modified });
+  expect(tree['a.txt']).toHaveProperty('created');
   expect(tree['dir']).toMatchObject({
     files: { 'b.bin': { contents: btoa('\xff'), encoding: 'base64' } }
   });

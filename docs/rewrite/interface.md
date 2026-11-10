@@ -41,6 +41,7 @@ To quickly populate the contents of a filesystem, we can use `mount`.
 await engine.fs.mount({
   'main.cpp': {
     contents: '#include <stdio>',
+    created: '2026-11-01T09:00:00Z',
     modified: '2026-11-09T12:00:00Z'
   },
   'uti.h': '#include <string>',
@@ -71,13 +72,14 @@ await engine.fs.mount(/* Filesystem */, { at: "/" });
 type Timestamp = string | Date | number;
 
 /**
- * The timestamps of a file. Only files carry timestamps, and creation times cannot be set.
+ * The timestamps of a file. Only files carry timestamps (`created` cannot be set yet).
  *
  * If a timestamp is not specified, it defaults to the current time.
  */
 type Timestamps = {
   accessed?: Timestamp;
   modified?: Timestamp;
+  created?: Timestamp;
 };
 
 /**
