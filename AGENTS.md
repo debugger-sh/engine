@@ -5,7 +5,7 @@
   - This command builds the Rust components to WASM and then bundles everything into the npm library.
 - `npm run tools:dap` to run a suite of integration tests against the Debugger Adapter Protocol (DAP).
 - `npm run tools:dap -- {test}` to run a specific integration test.
-- `npm run test:bun` / `npm run test:browser` to run the unit tests in `tests/bun` (headless Bun) and `tests/browser` (Chromium via Playwright).
+- `npm test` to run the unit tests in `tests/browser` (Vitest browser mode, in headless Chromium), against the built library. `npm test -- {path}` runs a subset (e.g. `npm test -- cpp/cache`). Each test is one small file, using the helpers in `tests/browser/helpers.ts`.
 - Don't use `web_sys::console`, instead use the provided `util::log!` and `util::warn!` macros which provide native Rust formatting.
 - Use `util::weak_error!` to dilute a `Result` into an `Option` (logging the error) for exceptional behaviour that doesn't need to panic, and especially in core interfaces.
 

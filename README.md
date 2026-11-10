@@ -102,7 +102,7 @@ cargo install wasm-pack
 npm install
 npm run build          # wasm-pack build --target web && vite build
 npm run dev            # local development
-npm test               # tests/bun (headless, in Bun) and tests/browser (Chromium, via Playwright)
+npm test               # tests/browser: one small test per file, run in Chromium (Vitest)
 npm run tools:dap      # DAP integration tests
 ```
 

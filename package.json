@@ -32,9 +32,7 @@
     "build:ts": "vite build",
     "build": "npm run build:rs && npm run build:ts",
     "build:release": "WASM_RELEASE=1 npm run build",
-    "test": "npm run test:bun && npm run test:browser",
-    "test:bun": "npx -y bun test tests/bun --timeout 120000",
-    "test:browser": "npx -y bun tests/browser/run.ts",
+    "test": "vitest run --config tests/browser/vitest.config.ts",
     "dev": "cd tools/dev && npm run dev --",
     "tools:dap": "cd tools/dap && npm run test --",
     "prepublishOnly": "npm run build:release",
@@ -52,6 +50,7 @@
   "devDependencies": {
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/node": "^22.13.1",
+    "@vitest/browser-playwright": "5.1.0",
     "eslint": "^9.39.2",
     "events": "^3.3.0",
     "husky": "^9.1.7",
@@ -62,6 +61,7 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.53.0",
     "vite": "^7.3.1",
-    "vite-plugin-dts": "^4.5.4"
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "5.1.0"
   }
 }
