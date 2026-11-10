@@ -1,5 +1,5 @@
 import { Fs } from '../../pkg/engine';
-import { Internals, join, locked } from './util';
+import { Internals, join } from './util';
 
 /** A file timestamp. Either an ISO 8601 string, a Date, or a milliseconds epoch. */
 export type Timestamp = string | Date | number;
@@ -67,8 +67,8 @@ const encoder = new TextEncoder();
  */
 export class Filesystem {
   [Internals]: {
-    /** Runs `fn` on the raw filesystem while holding the lock. */
-    locked<T>(fn: (fs: Fs) => T): Promise<T>;
+    /** The underlying filesystem, whose operations take care of locking. */
+    raw(): Fs;
     dispose(): void;
     readonly ptr: number;
   };
@@ -77,10 +77,9 @@ export class Filesystem {
     let current: Fs | undefined = fs;
     const ptr = fs.ptr();
     this[Internals] = {
-      locked: (fn) => {
-        const fs = current;
-        if (!fs) return Promise.reject(new Error('The engine has been disposed'));
-        return locked(() => fn(fs));
+      raw: () => {
+        if (!current) throw new Error('The engine has been disposed');
+        return current;
       },
       dispose: () => {
         current?.free();
@@ -90,8 +89,8 @@ export class Filesystem {
     };
   }
 
-  private locked<T>(fn: (fs: Fs) => T): Promise<T> {
-    return this[Internals].locked(fn);
+  private get raw(): Fs {
+    return this[Internals].raw();
   }
 
   /**
@@ -113,25 +112,22 @@ export class Filesystem {
       if (!response.ok) throw new Error(`Failed to fetch ${fs} (${response.status})`);
       fs = new Uint8Array(await response.arrayBuffer());
     }
-    if (fs instanceof Uint8Array) return this.locked((raw) => raw.mount(at, fs));
+    if (fs instanceof Uint8Array) return this.raw.mount(at, fs);
 
-    const tree = fs;
-    return this.locked((raw) => {
-      const mount = (dir: string, tree: FileTree) => {
-        raw.mkdir(dir, true);
-        for (const [name, node] of Object.entries(tree)) {
-          const path = join(dir, name);
-          if (typeof node === 'object' && 'files' in node) {
-            mount(path, node.files);
-            continue;
-          }
-          const file =
-            typeof node === 'string' || node instanceof Uint8Array ? { contents: node } : node;
-          raw.writeFile(path, bytes(file), time(file.modified), time(file.accessed));
+    const mount = async (dir: string, tree: FileTree) => {
+      await this.raw.mkdir(dir, true);
+      for (const [name, node] of Object.entries(tree)) {
+        const path = join(dir, name);
+        if (typeof node === 'object' && 'files' in node) {
+          await mount(path, node.files);
+          continue;
         }
-      };
-      mount(at, tree);
-    });
+        const file =
+          typeof node === 'string' || node instanceof Uint8Array ? { contents: node } : node;
+        await this.raw.writeFile(path, bytes(file), time(file.modified), time(file.accessed));
+      }
+    };
+    await mount(at, fs);
   }
 
   /** Exports the filesystem (or a part of it), in the same shapes accepted by {@link mount}. */
@@ -140,64 +136,61 @@ export class Filesystem {
   async export(options: ExportOptions = {}): Promise<FileTree | Uint8Array> {
     const { format = 'tree', include = ['**/*'], exclude = [] } = options;
     const at = join(options.at ?? '/');
-    if (format !== 'tree')
-      return this.locked((fs) => fs.archive(at, include, exclude, format === 'zip'));
+    if (format !== 'tree') return this.raw.archive(at, include, exclude, format === 'zip');
 
-    return this.locked((fs) => {
-      const root: Directory = { files: {} };
-      for (const entry of fs.glob(at, include, exclude)) {
-        const parts = entry.replace(/\/$/, '').split('/');
-        const name = parts.pop()!;
-        let dir = root;
-        for (const part of parts) dir = (dir.files[part] ??= { files: {} }) as Directory;
-        if (entry.endsWith('/')) {
-          dir.files[name] ??= { files: {} };
-        } else {
-          const path = join(at, entry);
-          const [, , modified, accessed, created] = fs.stat(path);
-          dir.files[name] = {
-            ...encode(fs.readFile(path)),
-            modified: iso(modified),
-            accessed: iso(accessed),
-            created: iso(created)
-          };
-        }
+    const root: Directory = { files: {} };
+    for (const entry of await this.raw.glob(at, include, exclude)) {
+      const parts = entry.replace(/\/$/, '').split('/');
+      const name = parts.pop()!;
+      let dir = root;
+      for (const part of parts) dir = (dir.files[part] ??= { files: {} }) as Directory;
+      if (entry.endsWith('/')) {
+        dir.files[name] ??= { files: {} };
+      } else {
+        const path = join(at, entry);
+        const [, , modified, accessed, created] = await this.raw.stat(path);
+        dir.files[name] = {
+          ...encode(await this.raw.readFile(path)),
+          modified: iso(modified),
+          accessed: iso(accessed),
+          created: iso(created)
+        };
       }
-      return root.files;
-    });
+    }
+    return root.files;
   }
 
   readFile(path: string, encoding: 'utf8'): Promise<string>;
   readFile(path: string): Promise<Uint8Array>;
   async readFile(path: string, encoding?: 'utf8'): Promise<Uint8Array | string> {
-    const contents = await this.locked((fs) => fs.readFile(path));
+    const contents = await this.raw.readFile(path);
     return encoding === 'utf8' ? new TextDecoder().decode(contents) : contents;
   }
 
-  writeFile(path: string, contents: string | Uint8Array): Promise<void> {
-    return this.locked((fs) => fs.writeFile(path, bytes({ contents })));
+  async writeFile(path: string, contents: string | Uint8Array): Promise<void> {
+    return this.raw.writeFile(path, bytes({ contents }));
   }
 
-  mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
-    return this.locked((fs) => fs.mkdir(path, options?.recursive ?? false));
+  async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+    return this.raw.mkdir(path, options?.recursive ?? false);
   }
 
-  remove(path: string, options?: { recursive?: boolean }): Promise<void> {
-    return this.locked((fs) => fs.remove(path, options?.recursive ?? false));
+  async remove(path: string, options?: { recursive?: boolean }): Promise<void> {
+    return this.raw.remove(path, options?.recursive ?? false);
   }
 
-  rename(from: string, to: string): Promise<void> {
-    return this.locked((fs) => fs.rename(from, to));
+  async rename(from: string, to: string): Promise<void> {
+    return this.raw.rename(from, to);
   }
 
   async stat(path: string): Promise<FileStat> {
-    const [isDir, size, modified, accessed, created] = await this.locked((fs) => fs.stat(path));
+    const [isDir, size, modified, accessed, created] = await this.raw.stat(path);
     return { kind: isDir ? 'directory' : 'file', size, modified, accessed, created };
   }
 
   /** Lists the names of the entries in a directory. */
-  readDir(path: string): Promise<string[]> {
-    return this.locked((fs) => fs.readDir(path));
+  async readDir(path: string): Promise<string[]> {
+    return this.raw.readDir(path);
   }
 }
 

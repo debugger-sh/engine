@@ -1,7 +1,7 @@
 import type { Fs } from '../../pkg/engine';
 import type { Filesystem } from './fs';
 import type { Process } from './process';
-import { dirname, Internals, join, locked } from './util';
+import { dirname, Internals, join } from './util';
 
 const LLVM = 'https://fabioibanez.github.io/website/llvm.core.wasm';
 const RUSTC = 'https://debugger-sh.github.io/engine/rustc.wasm';
@@ -104,7 +104,7 @@ async function python(ctx: Context<'python'>): Promise<number> {
   const { options } = ctx;
   let args = ctx.args;
   if (!args.length && !options.repl) {
-    const [script] = await ctx.fs[Internals].locked((fs) => fs.glob('/', ['**/*.py'], []));
+    const [script] = await ctx.fs[Internals].raw().glob('/', ['**/*.py'], []);
     if (!script) {
       ctx.process.error('python: no Python file found');
       return 2;
@@ -138,9 +138,7 @@ async function compileAll(
 }
 
 async function sources(ctx: Context<'cpp' | 'rust'>, defaults: string[]): Promise<string[]> {
-  const found = await ctx.fs[Internals].locked((fs) =>
-    fs.glob('/', ctx.options.sources ?? defaults, [])
-  );
+  const found = await ctx.fs[Internals].raw().glob('/', ctx.options.sources ?? defaults, []);
   return found.filter((path) => !path.endsWith('/')).map((path) => join(path));
 }
 
@@ -197,37 +195,32 @@ async function isStale(
   dep: string,
   command: string
 ): Promise<boolean> {
-  return fs[Internals].locked((raw) => {
-    if (!raw.hash(obj)) return true;
-    let text;
-    try {
-      text = new TextDecoder().decode(raw.readFile(dep));
-    } catch {
-      return true;
-    }
-    const [rule, ...lines] = text.replace(/\\\n/g, ' ').split('\n');
-    if (!lines.includes(`# ${command}`)) return true;
-    const hashes = new Map(lines.map((line) => line.split(': ') as [string, string]));
-    const deps = rule
-      .slice(rule.indexOf(': ') + 2)
-      .split(/\s+/)
-      .filter(Boolean);
-    return deps.some((path) => !hashes.has(path) || hashes.get(path) !== raw.hash(path));
-  });
+  const raw = fs[Internals].raw();
+  const text = await fs.readFile(dep, 'utf8').catch(() => undefined);
+  if (text === undefined || !(await raw.hash(obj))) return true;
+  const [rule, ...lines] = text.replace(/\\\n/g, ' ').split('\n');
+  if (!lines.includes(`# ${command}`)) return true;
+  const hashes = new Map(lines.map((line) => line.split(': ') as [string, string]));
+  for (const path of dependencies(rule))
+    if (hashes.get(path) !== (await raw.hash(path))) return true;
+  return false;
 }
 
 /** Extends the compiler's `.d` file with the hash of every dependency (and the command). */
 async function recordHashes(fs: Filesystem, dep: string, command: string) {
-  await fs[Internals].locked((raw) => {
-    const text = new TextDecoder().decode(raw.readFile(dep)).trimEnd();
-    const rule = text.replace(/\\\n/g, ' ');
-    const deps = rule
-      .slice(rule.indexOf(': ') + 2)
-      .split(/\s+/)
-      .filter(Boolean);
-    const lines = deps.map((path) => `${path}: ${raw.hash(path)}`);
-    raw.writeFile(dep, new TextEncoder().encode([text, ...lines, `# ${command}`, ''].join('\n')));
-  });
+  const text = (await fs.readFile(dep, 'utf8')).trimEnd();
+  const paths = dependencies(text.replace(/\\\n/g, ' '));
+  const hashes = await Promise.all(paths.map((path) => fs[Internals].raw().hash(path)));
+  const lines = paths.map((path, i) => `${path}: ${hashes[i]}`);
+  await fs.writeFile(dep, [text, ...lines, `# ${command}`, ''].join('\n'));
+}
+
+/** The dependencies of a Makefile rule (`target: dep dep …`). */
+function dependencies(rule: string): string[] {
+  return rule
+    .slice(rule.indexOf(': ') + 2)
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
 /** The standard library rlibs to link, in dependency order. */
@@ -249,12 +242,12 @@ async function rust(ctx: Context<'rust'>): Promise<number> {
   const debug = ctx.options.debug ? ['-g', '-Copt-level=0'] : [];
 
   // rustc also emits the allocator shim as `{crate}.{hash}.rcgu.o`, next to the object
-  const shims = (source: string) =>
-    ctx.fs[Internals].locked((fs) => {
-      const crate = source.split('/').pop()!.replace(/\.rs$/, '').replaceAll('-', '_');
-      const dir = dirname(object(source));
-      return fs.glob(dir, [`${crate}.*.rcgu.o`], []).map((name) => join(dir, name));
-    });
+  const shims = async (source: string) => {
+    const crate = source.split('/').pop()!.replace(/\.rs$/, '').replaceAll('-', '_');
+    const dir = dirname(object(source));
+    const names = await ctx.fs[Internals].raw().glob(dir, [`${crate}.*.rcgu.o`], []);
+    return names.map((name) => join(dir, name));
+  };
 
   const code = await compileAll(files, async (source) => {
     await ctx.fs.mkdir(dirname(object(source)), { recursive: true });
@@ -272,7 +265,7 @@ async function rust(ctx: Context<'rust'>): Promise<number> {
 
   const lib = '/lib/rustlib/wasm32-wasip1/lib';
   const fs = await ctx.sysroot(sysroot);
-  const rlibs = fs ? await locked(() => fs.glob(lib, ['*.rlib'], [])) : [];
+  const rlibs = fs ? await fs.glob(lib, ['*.rlib'], []) : [];
   const libs = RUST_LIBS.map((name) => rlibs.find((rlib) => rlib.startsWith(`lib${name}-`)))
     .filter((rlib) => rlib !== undefined)
     .map((rlib) => join(lib, rlib));

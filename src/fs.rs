@@ -5,9 +5,8 @@
 //! on the same files with zero copies.
 //!
 //! All accesses are serialized by one global lock. Workers block on it ([`Shared`]),
-//! whereas the main thread must never block: it only ever [`try_lock`]s (see the
-//! `async` spin-yield loop on the TypeScript side) and then operates on the raw
-//! filesystem through [`Fs`].
+//! whereas the main thread must never block: its operations ([`Fs`]) are `async`, and
+//! yield to the event loop while the lock is taken.
 
 use std::io::{self, Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
@@ -33,17 +32,15 @@ use crate::worker::gate::Critical;
 
 static LOCK: AtomicBool = AtomicBool::new(false);
 
-/// Attempts to take the filesystem lock without blocking. Used by the main thread.
-#[wasm_bindgen]
-pub fn try_lock() -> bool {
+fn try_lock() -> bool {
     LOCK.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
         .is_ok()
 }
 
-/// Releases the filesystem lock taken by [`try_lock`].
 #[wasm_bindgen]
-pub fn unlock() {
-    LOCK.store(false, Ordering::Release);
+extern "C" {
+    #[wasm_bindgen(js_name = setTimeout)]
+    fn set_timeout(callback: &js_sys::Function, ms: i32);
 }
 
 /// Holds the filesystem lock (and marks a critical section) until dropped.
@@ -58,11 +55,22 @@ impl Guard {
         }
         Self(critical)
     }
+
+    /// Takes the filesystem lock without ever blocking: while it is taken, yields to
+    /// the event loop and retries. Main thread-only, since the main thread must never
+    /// block on (or spin for) a worker.
+    async fn lock_async() -> Self {
+        while !try_lock() {
+            let tick = js_sys::Promise::new(&mut |resolve, _| set_timeout(&resolve, 0));
+            let _ = wasm_bindgen_futures::JsFuture::from(tick).await;
+        }
+        Self(Critical::enter())
+    }
 }
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        unlock();
+        LOCK.store(false, Ordering::Release);
     }
 }
 
@@ -304,9 +312,8 @@ impl FileOpener for Root {
 // │ Main-thread API                                                          │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-/// An owned handle to a shared filesystem (the workspace or a sysroot).
-///
-/// Every method assumes that the caller holds the lock (see [`try_lock`]).
+/// An owned handle to a shared filesystem (the workspace or a sysroot), for the main
+/// thread. Every operation takes the lock (see [`Guard::lock_async`]).
 #[wasm_bindgen]
 pub struct Fs(*mut mem_fs::FileSystem);
 
@@ -446,25 +453,29 @@ impl Fs {
     }
 
     /// Unions the contents of a tarball or zip archive into the directory `at`.
-    pub fn mount(&self, at: &str, bytes: &[u8]) -> Result<(), JsError> {
-        self.extract(&normalize(at), bytes)
+    pub async fn mount(&self, at: String, bytes: Vec<u8>) -> Result<(), JsError> {
+        let _guard = Guard::lock_async().await;
+        self.extract(&normalize(at), &bytes)
     }
 
     #[wasm_bindgen(js_name = "readFile")]
-    pub fn read_file(&self, path: &str) -> Result<Vec<u8>, JsError> {
+    pub async fn read_file(&self, path: String) -> Result<Vec<u8>, JsError> {
+        let _guard = Guard::lock_async().await;
         let path = normalize(path);
         self.read(&path).map_err(|e| fs_error(e, &path))
     }
 
     /// Writes a file. Times are in milliseconds since the epoch, defaulting to now.
     #[wasm_bindgen(js_name = "writeFile")]
-    pub fn write_file(&self, path: &str, contents: &[u8], modified: Option<f64>, accessed: Option<f64>) -> Result<(), JsError> {
+    pub async fn write_file(&self, path: String, contents: Vec<u8>, modified: Option<f64>, accessed: Option<f64>) -> Result<(), JsError> {
+        let _guard = Guard::lock_async().await;
         let path = normalize(path);
         let ns = |ms: Option<f64>| ms.map(|ms| (ms * 1e6) as u64);
-        self.write(&path, contents, ns(accessed), ns(modified)).map_err(|e| fs_error(e, &path))
+        self.write(&path, &contents, ns(accessed), ns(modified)).map_err(|e| fs_error(e, &path))
     }
 
-    pub fn mkdir(&self, path: &str, recursive: bool) -> Result<(), JsError> {
+    pub async fn mkdir(&self, path: String, recursive: bool) -> Result<(), JsError> {
+        let _guard = Guard::lock_async().await;
         let path = normalize(path);
         match recursive {
             true => create_dir_all(self.fs(), &path),
@@ -473,7 +484,8 @@ impl Fs {
         .map_err(|e| fs_error(e, &path))
     }
 
-    pub fn remove(&self, path: &str, recursive: bool) -> Result<(), JsError> {
+    pub async fn remove(&self, path: String, recursive: bool) -> Result<(), JsError> {
+        let _guard = Guard::lock_async().await;
         let path = normalize(path);
         let fs = self.fs();
         let metadata = fs.metadata(&path).map_err(|e| fs_error(e, &path))?;
@@ -495,13 +507,15 @@ impl Fs {
         fs.remove_dir(&path).map_err(|e| fs_error(e, &path))
     }
 
-    pub fn rename(&self, from: &str, to: &str) -> Result<(), JsError> {
+    pub async fn rename(&self, from: String, to: String) -> Result<(), JsError> {
+        let _guard = Guard::lock_async().await;
         let (from, to) = (normalize(from), normalize(to));
         now(self.fs().rename(&from, &to)).map_err(|e| fs_error(e, &from))
     }
 
     /// Returns `[isDir, size, modified, accessed, created]` (times in milliseconds).
-    pub fn stat(&self, path: &str) -> Result<Vec<f64>, JsError> {
+    pub async fn stat(&self, path: String) -> Result<Vec<f64>, JsError> {
+        let _guard = Guard::lock_async().await;
         let path = normalize(path);
         let m = self.fs().metadata(&path).map_err(|e| fs_error(e, &path))?;
         let ms = |ns: u64| (ns / 1_000_000) as f64;
@@ -510,7 +524,8 @@ impl Fs {
     }
 
     #[wasm_bindgen(js_name = "readDir")]
-    pub fn read_dir(&self, path: &str) -> Result<Vec<String>, JsError> {
+    pub async fn read_dir(&self, path: String) -> Result<Vec<String>, JsError> {
+        let _guard = Guard::lock_async().await;
         let path = normalize(path);
         let entries = self.fs().read_dir(&path).map_err(|e| fs_error(e, &path))?;
         let mut names: Vec<String> = entries
@@ -523,7 +538,8 @@ impl Fs {
 
     /// Paths beneath `at` (relative to it) matching `include` but not `exclude`.
     /// Directories are suffixed with `/`.
-    pub fn glob(&self, at: &str, include: Vec<String>, exclude: Vec<String>) -> Result<Vec<String>, JsError> {
+    pub async fn glob(&self, at: String, include: Vec<String>, exclude: Vec<String>) -> Result<Vec<String>, JsError> {
+        let _guard = Guard::lock_async().await;
         let entries = self.matches(&normalize(at), include, exclude)?;
         Ok(entries
             .into_iter()
@@ -532,13 +548,15 @@ impl Fs {
     }
 
     /// A hash of a file's contents, or `undefined` if it cannot be read.
-    pub fn hash(&self, path: &str) -> Option<String> {
+    pub async fn hash(&self, path: String) -> Option<String> {
+        let _guard = Guard::lock_async().await;
         let contents = self.read(&normalize(path)).ok()?;
         Some(format!("{:08x}", crc32fast::hash(&contents)))
     }
 
     /// Exports the matching entries beneath `at` as a `.tar.gz` (or `.zip`) archive.
-    pub fn archive(&self, at: &str, include: Vec<String>, exclude: Vec<String>, zip: bool) -> Result<Vec<u8>, JsError> {
+    pub async fn archive(&self, at: String, include: Vec<String>, exclude: Vec<String>, zip: bool) -> Result<Vec<u8>, JsError> {
+        let _guard = Guard::lock_async().await;
         let at = normalize(at);
         let entries = self.matches(&at, include, exclude)?;
         let contents = |name: &str| self.read(&at.join(name)).map_err(|e| fs_error(e, &at.join(name)));
