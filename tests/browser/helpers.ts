@@ -48,7 +48,9 @@ int main(int argc, char** argv) {
 /** Creates an engine with a multi-purpose test program (see {@link TOOL}) at `/bin/main`. */
 export async function withTool(): Promise<Engine> {
   const tool = await createEngine({ src: { files: { 'tool.cpp': TOOL } } });
-  const { exitCode, stderr } = await output(tool.run('cpp', { cwd: '/src', buildDir: '/bin' }));
+  const { exitCode, stderr } = await output(
+    tool.run('cpp', { sources: ['src/*.cpp'], buildDir: '/bin' })
+  );
   if (exitCode !== 0) throw new Error(stderr);
   return tool;
 }

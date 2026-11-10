@@ -77,13 +77,11 @@ test('no sources exits non-zero', async () => {
   expect((await engine.run('cpp')).exitCode).not.toBe(0);
 });
 
-test('sources and cwd select what is compiled', async () => {
+test('sources select what is compiled', async () => {
   const engine = await createEngine({
     app: { files: { 'main.cpp': HELLO, 'broken.cpp': 'nope' } }
   });
-  expect((await output(engine.run('cpp', { cwd: '/app', sources: ['main.cpp'] }))).stdout).toBe(
-    'hello\n'
-  );
+  expect((await output(engine.run('cpp', { sources: ['app/main.cpp'] }))).stdout).toBe('hello\n');
 });
 
 test('programs read stdin', async () => {

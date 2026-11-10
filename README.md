@@ -59,7 +59,6 @@ await engine.fs.writeFile(path, contents);
 // Processes: toolchains (cpp, rust, python), built-ins (clang, clang++, lld, rustc),
 // or WASI executables (a URL, a path like /build/main or ./main, or bytes)
 const proc = engine.run('cpp', ['program', 'args'], {
-  cwd,
   env,
   sysroot,
   debug,
@@ -80,9 +79,6 @@ debuggable.debugger.on('event', fn);
 
 The full interface is described in [docs/rewrite/interface.md](./docs/rewrite/interface.md), and the
 debugger integration in the [integration guide](./docs/integration.md#debugger-dap).
-
-> WASI preview 1 programs (built with `wasi-libc`, like the bundled toolchains) always start in
-> `/`, whatever their `cwd`, so toolchains pass them absolute paths.
 
 ---
 

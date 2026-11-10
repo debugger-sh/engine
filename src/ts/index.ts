@@ -13,7 +13,7 @@ import {
   type ToolchainOptionsMap,
   toolchains
 } from './toolchains';
-import { Internals, join, resolve } from './util';
+import { Internals } from './util';
 
 /**
  * A command to run: a language toolchain or built-in command, or a WASI executable
@@ -197,18 +197,16 @@ export class Engine {
     args: string[],
     options: StepOptions
   ): Promise<number> {
-    const cwd = join(options.cwd ?? '/');
     const env = options.env ?? {};
     const ctx: Context<Toolchain> = {
       args,
       options: options as Context<Toolchain>['options'],
-      cwd,
       env,
       fs: this.fs,
       process,
       run: async (command, args, step = {}) => {
         const stdio = { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr };
-        const child = this.spawn(stdio, process.debugger, command, args, { cwd, env, ...step });
+        const child = this.spawn(stdio, process.debugger, command, args, { env, ...step });
         const release = process.onKill(() => child.kill());
         const { exitCode } = await child;
         release();
@@ -279,7 +277,6 @@ export class Engine {
       path: program.path,
       args,
       env: Object.entries(options.env ?? {}),
-      cwd: resolve('/', options.cwd ?? '/'),
       workspace: this.fs[Internals].ptr,
       sysroot,
       stdin: process.stdin.buffer,

@@ -23,8 +23,6 @@ export const commands: Record<string, [url: string, name: string]> = {
 };
 
 export interface BaseOptions {
-  /** Absolute or relative path to a directory to run this command from. Relative paths are relative to "/". */
-  cwd?: string;
   /** Environment variables to supply to the command. For toolchains, this is shared by all steps. */
   env?: Record<string, string>;
   /**
@@ -47,7 +45,7 @@ export interface PythonOptions {
 }
 
 export interface CppOptions {
-  /** Globs, relative to `cwd`, of C/C++ sources to compile. Defaults to `["**\/*.{c,cc,cp,cpp,cxx,c++}"]` */
+  /** Globs, relative to `/`, of C/C++ sources to compile. Defaults to `["**\/*.{c,cc,cp,cpp,cxx,c++}"]` */
   sources?: string[];
   /** The directory where object files and the executable (`main`) are placed. Defaults to `/build` */
   buildDir?: string;
@@ -58,7 +56,7 @@ export interface CppOptions {
 }
 
 export interface RustOptions {
-  /** Globs, relative to `cwd`, of Rust sources to compile. Defaults to `["**\/*.rs"]` */
+  /** Globs, relative to `/`, of Rust sources to compile. Defaults to `["**\/*.rs"]` */
   sources?: string[];
   /** The directory where object files and the executable (`main`) are placed. Defaults to `/build` */
   buildDir?: string;
@@ -87,11 +85,10 @@ export type StepOptions = Omit<BaseOptions, 'debug'> & {
 export interface Context<T extends Toolchain> {
   args: string[];
   options: BaseOptions & ToolchainOptionsMap[T];
-  cwd: string;
   env: Record<string, string>;
   fs: Filesystem;
   process: Process;
-  /** Runs a step as a child process sharing this process' stdio, debugger, `cwd` and `env`. */
+  /** Runs a step as a child process sharing this process' stdio, debugger and `env`. */
   run(command: string, args: string[], options?: StepOptions): Promise<number>;
   /** Loads a sysroot (a toolchain name or URL), so that the toolchain can inspect it. */
   sysroot(url: string): Promise<Fs | undefined>;
@@ -107,12 +104,12 @@ async function python(ctx: Context<'python'>): Promise<number> {
   const { options } = ctx;
   let args = ctx.args;
   if (!args.length && !options.repl) {
-    const [script] = await ctx.fs[Internals].locked((fs) => fs.glob(ctx.cwd, ['**/*.py'], []));
+    const [script] = await ctx.fs[Internals].locked((fs) => fs.glob('/', ['**/*.py'], []));
     if (!script) {
       ctx.process.error('python: no Python file found');
       return 2;
     }
-    args = [join(ctx.cwd, script)];
+    args = [join(script)];
   }
   return ctx.run(PYTHON, args.length ? args : ['-i'], {
     name: 'python',
@@ -142,9 +139,9 @@ async function compileAll(
 
 async function sources(ctx: Context<'cpp' | 'rust'>, defaults: string[]): Promise<string[]> {
   const found = await ctx.fs[Internals].locked((fs) =>
-    fs.glob(ctx.cwd, ctx.options.sources ?? defaults, [])
+    fs.glob('/', ctx.options.sources ?? defaults, [])
   );
-  return found.filter((path) => !path.endsWith('/')).map((path) => join(ctx.cwd, path));
+  return found.filter((path) => !path.endsWith('/')).map((path) => join(path));
 }
 
 async function cpp(ctx: Context<'cpp'>): Promise<number> {

@@ -51,7 +51,6 @@ pub struct Job {
     path: Option<String>,
     args: Vec<String>,
     env: Vec<(String, String)>,
-    cwd: String,
     workspace: u32,
     sysroot: Option<u32>,
     #[serde(with = "serde_wasm_bindgen::preserve")]
@@ -104,7 +103,7 @@ fn fail(name: &str, code: i32, message: impl std::fmt::Display) -> Result<i32, J
 }
 
 async fn run(job: Job) -> Result<i32, JsError> {
-    let Job { name, module, bytes, path, mut args, env, cwd, workspace, sysroot, stdin, debug } = job;
+    let Job { name, module, bytes, path, mut args, env, workspace, sysroot, stdin, debug } = job;
     let workspace = unsafe { Shared::from_ptr(workspace) };
     let sysroot = sysroot.map(|ptr| unsafe { Shared::from_ptr(ptr) });
 
@@ -122,11 +121,11 @@ async fn run(job: Job) -> Result<i32, JsError> {
     /* Resolve the program */
     let bytes = match (bytes, path) {
         (Some(bytes), _) => Some(bytes),
-        (None, Some(path)) => match fs.metadata(&normalize(&cwd).join(&path)) {
+        (None, Some(path)) => match fs.metadata(&normalize(&path)) {
             Err(_) => return fail(&name, 127, "command not found"),
             Ok(metadata) if metadata.is_dir() => return fail(&name, 126, "cannot execute"),
             Ok(_) => {
-                let mut file = fs.new_open_options().read(true).open(normalize(&cwd).join(&path))?;
+                let mut file = fs.new_open_options().read(true).open(normalize(&path))?;
                 let mut bytes = Vec::new();
                 file.read_to_end(&mut bytes).await?;
                 Some(bytes)
@@ -165,7 +164,6 @@ async fn run(job: Job) -> Result<i32, JsError> {
         .envs(env)
         .runtime(JsRuntime::instance())
         .fs(Box::new(fs))
-        .current_dir(normalize(&cwd))
         .stdout(Box::new(Stdout::new(StdoutMode::Out)))
         .stderr(Box::new(Stdout::new(StdoutMode::Err)))
         .stdin(Box::new(Stdin::new(&stdin)));

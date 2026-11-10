@@ -217,7 +217,7 @@ readDir(path: string): Promise<string[]>; // List of file names
 
 The old version of this library may not have supported relative paths. For example, trying to read from `data.txt` may have thrown an error. The new version should support such paths.
 
-This is true for all filesystem operations, whether inside the guest program or in the main thread JS API. The JS API should treat relative paths as relative to the root folder of the engine, such that `data.txt` and `/data.txt` refer to the same file. Guest programs should treat relative paths as relative to their `cwd`.
+This is true for all filesystem operations, whether inside the guest program or in the main thread JS API. The JS API should treat relative paths as relative to the root folder of the engine, such that `data.txt` and `/data.txt` refer to the same file.
 
 ## Processes
 
@@ -289,13 +289,6 @@ interface ToolchainOptionsMap {
 
 interface BaseOptions {
   /**
-   * Absolute or relative path to a directory to run this command from.
-   *
-   * Relative paths are treated as relative to "/".
-   */
-  cwd?: string;
-
-  /**
    * Environment variables to supply to the command.
    * For toolchains/subprocesses, this will be shared by all steps.
    */
@@ -340,7 +333,7 @@ interface PythonOptions {
 
 interface CppOptions {
   /**
-   * List of file globs, evaluated relative to `cwd`, for determining C/C++ sources to compile.
+   * List of file globs, evaluated relative to `/`, for determining C/C++ sources to compile.
    *
    * Defaults to `["**\*.{c,cc,cp,cpp,cxx,c++}"]`
    */
@@ -366,7 +359,7 @@ interface CppOptions {
 
 interface RustOptions {
   /**
-   * List of file globs, evaluated relative to `cwd`, for determining Rust sources to compile.
+   * List of file globs, evaluated relative to `/`, for determining Rust sources to compile.
    *
    * Defaults to `["**\*.rs"]`
    */
@@ -393,7 +386,7 @@ Note: processes begin to run as soon as they are instantiated (with a caveat for
 To avoid ambiguity, treat `command` as:
 
 1. A WASI executable to be downloaded if it is a URL (starts with `http://` or `https://`).
-2. A WASI executable to be loaded from the filesystem if it is an absolute path (e.g. `/main`) or `.`-prefixed relative path (e.g. `./main`).
+2. A WASI executable to be loaded from the filesystem if it is an absolute path (e.g. `/main`) or `.`-prefixed path relative to `/` (e.g. `./main`).
 3. A toolchain or built-in command, if any (e.g. `clang++` or `python`).
 
 Note that there is no ambiguity between (2) and (3): (2) requires an absolute path or `.` path for an executable to be loaded from the filesystem.
@@ -412,7 +405,7 @@ Same behaviour as `cpp`.
 
 ##### `python`
 
-If `args` are given, they are forwarded perfectly to the `python` binary. Otherwise, the first (alphabetical) Python file found under `cwd` is run, or the process exits with a non-zero exit code if none is found. If `repl: true` is set (and no `args` are given), an interactive REPL is run instead.
+If `args` are given, they are forwarded perfectly to the `python` binary. Otherwise, the first (alphabetical) Python file in the filesystem is run, or the process exits with a non-zero exit code if none is found. If `repl: true` is set (and no `args` are given), an interactive REPL is run instead.
 
 ### Waiting for a process to complete
 

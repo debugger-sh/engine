@@ -143,9 +143,9 @@ test('runs an executable from an absolute path', async () => {
   expect(await tool.run('/bin/main', ['exit', '3'])).toEqual({ exitCode: 3, killed: false });
 });
 
-test('runs an executable from a relative path, resolved against cwd', async () => {
+test('runs an executable from a relative path, resolved against the root', async () => {
   const tool = await withTool();
-  expect(await tool.run('./main', ['exit', '4'], { cwd: '/bin' })).toEqual({
+  expect(await tool.run('./bin/main', ['exit', '4'])).toEqual({
     exitCode: 4,
     killed: false
   });

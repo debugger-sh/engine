@@ -8,14 +8,6 @@ test('forwards args to the python binary', async () => {
   expect((await output(engine.run('python', ['-c', 'print(6 * 7)']))).stdout).toBe('42\n');
 });
 
-test('looks for Python files under cwd', async () => {
-  const engine = await createEngine({
-    'a.py': 'print("root")',
-    app: { files: { 'z.py': 'print("app")' } }
-  });
-  expect((await output(engine.run('python', { cwd: '/app' }))).stdout).toBe('app\n');
-});
-
 test('env is passed to the program', async () => {
   const engine = await createEngine({ 'main.py': 'import os; print(os.environ["NAME"])' });
   expect((await output(engine.run('python', { env: { NAME: 'py' } }))).stdout).toBe('py\n');
@@ -43,7 +35,7 @@ test('reads and writes the shared filesystem', async () => {
   expect(await engine.fs.readFile('/out.txt', 'utf8')).toBe('HI');
 });
 
-test('runs the first Python file (alphabetically) under cwd', async () => {
+test('runs the first Python file (alphabetically)', async () => {
   const engine = await createEngine({ 'b.py': 'print("b")', 'a.py': 'print("a")' });
   expect(await output(engine.run('python'))).toMatchObject({ exitCode: 0, stdout: 'a\n' });
 });

@@ -35,11 +35,6 @@ export function join(...parts: string[]): string {
   return '/' + out.join('/');
 }
 
-/** Resolves `path` against the directory `cwd`. */
-export function resolve(cwd: string, path: string): string {
-  return path.startsWith('/') ? join(path) : join(cwd, path);
-}
-
 export function dirname(path: string): string {
   return join(path, '..');
 }
