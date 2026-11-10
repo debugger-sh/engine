@@ -24,6 +24,27 @@ pub(crate) async fn create_user_fs(node: FsNode) -> Result<mem_fs::FileSystem, s
     Ok(fs)
 }
 
+pub(crate) async fn mount_binary_files(
+    fs: &mem_fs::FileSystem,
+    files: std::collections::HashMap<String, serde_bytes::ByteBuf>,
+) -> Result<(), String> {
+    for (path, bytes) in files {
+        if !path.starts_with('/') || path.split('/').skip(1).any(|part| matches!(part, "" | "." | "..")) {
+            return Err(format!("Invalid binary input path: {path}"));
+        }
+        let written = async {
+            create_dir_all(fs, Path::new(&path).parent().unwrap())?;
+            let mut file = fs.new_open_options().write(true).create_new(true).open(&path)?;
+            file.write_all(&bytes).await
+        }.await;
+        if let Err(error) = written {
+            return Err(format!("Cannot mount binary input {path}: {error}"));
+        }
+    }
+
+    Ok(())
+}
+
 async fn create_user_fs_rec(
     fs: &mem_fs::FileSystem,
     base_path: &PathBuf,
@@ -174,8 +195,11 @@ pub(crate) fn stop(exit_code: i32, build_start: Instant, run_start: Option<Insta
 }
 
 async fn start(msg: WorkerStart) {
-    if msg.lang != Lang::C && (msg.cpp_artifacts.is_some() || !msg.binary_files.is_empty()) {
+    if msg.lang != Lang::C && msg.cpp_artifacts.is_some() {
         return WorkerOut::Error { message: "Binary build inputs require C/C++".into() }.send();
+    }
+    if msg.lang == Lang::Rust && !msg.binary_files.is_empty() {
+        return WorkerOut::Error { message: "Binary runtime files require Python or C/C++".into() }.send();
     }
     match msg.lang {
         Lang::Python => crate::python::worker::start(msg).await,
@@ -215,18 +239,8 @@ async fn start_native(msg: WorkerStart) {
         .await
         .expect("created user files filesystem");
 
-    for (path, bytes) in msg.binary_files {
-        if !path.starts_with('/') || path.split('/').skip(1).any(|part| matches!(part, "" | "." | "..")) {
-            return WorkerOut::Error { message: format!("Invalid binary input path: {path}") }.send();
-        }
-        let written = async {
-            create_dir_all(&fs, Path::new(&path).parent().unwrap())?;
-            let mut file = fs.new_open_options().write(true).create_new(true).open(&path)?;
-            file.write_all(&bytes).await
-        }.await;
-        if let Err(error) = written {
-            return WorkerOut::Error { message: format!("Cannot mount binary input {path}: {error}") }.send();
-        }
+    if let Err(message) = mount_binary_files(&fs, msg.binary_files).await {
+        return WorkerOut::Error { message }.send();
     }
 
     let exec = Execution::new(msg.stdin_buffer);

@@ -63,7 +63,7 @@ export class Engine {
    */
   public fs: DirNode = {};
 
-  /** Optional binary build inputs, addressed by absolute virtual paths. */
+  /** Optional Python/C++ binary files, addressed by absolute virtual paths. */
   public binaryFiles: Record<string, Uint8Array> = {};
   public cppArtifacts?: CppArtifacts;
 

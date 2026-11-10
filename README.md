@@ -54,7 +54,7 @@ await engine.run();
 const engine = await Engine.create('c'); // 'c' | 'python'
 
 engine.fs; // DirNode  — virtual filesystem, set before run()
-engine.binaryFiles; // Record<string, Uint8Array> — optional C/C++ binary files
+engine.binaryFiles; // Record<string, Uint8Array> — optional Python/C++ binary files
 engine.cppArtifacts; // Optional selected sources, archives, and precompiled header
 engine.stdout; // Stdout   — .on('data', (chunk: Uint8Array) => …) / .off(...)
 engine.stderr; // Stdout
@@ -77,10 +77,12 @@ See [Presentation filtering (Python)](./docs/integration.md#presentation-filteri
 
 ---
 
-## Precompiled C++ inputs
+## Binary files and precompiled C++ inputs
 
-Set `binaryFiles` to bytes keyed by absolute virtual paths. Set `cppArtifacts`
-to select source files, link archives, or use a precompiled header:
+Set `binaryFiles` to bytes keyed by absolute virtual paths for Python or C/C++.
+For example, `{ '/images/photo.png': imageBytes }` makes an image available to
+the program in Run and Debug. For C/C++, set `cppArtifacts` to select source
+files, link archives, or use a precompiled header:
 
 ```ts
 engine.binaryFiles = { '/support.a': archiveBytes, '/headers.pch': headerBytes };
@@ -99,7 +101,8 @@ Clear them before reusing an engine for an ordinary source-only run.
 
 Build artifacts with the same compiler, sysroot, and flags as the engine. A PCH
 also needs its original header files at their original virtual paths. These
-inputs work in Run and Debug for C/C++ only; Python and Rust reject them.
+build inputs work in Run and Debug for C/C++ only; Python and Rust reject
+`cppArtifacts`. Rust also rejects `binaryFiles`.
 
 ---
 

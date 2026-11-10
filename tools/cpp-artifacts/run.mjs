@@ -15,11 +15,11 @@ const modulePath =
   fileURLToPath(new URL('../../dist/debugger-sh.js', import.meta.url));
 const engineModule = await readFile(modulePath);
 const fixtures = await buildFixtures(process.argv.includes('--exceptions'));
-const html = `<script type="module">
+const html = `<meta charset="utf-8"><script type="module">
 import { Engine } from '/engine.js';
 window.probe = {
-  async create() {
-    this.engine = await Engine.create('c');
+  async create(lang = 'c') {
+    this.engine = await Engine.create(lang);
     const decoder = new TextDecoder();
     this.engine.stdout.on('data', bytes => this.state.stdout += decoder.decode(bytes));
     this.engine.stderr.on('data', bytes => this.state.stderr += decoder.decode(bytes));
@@ -27,26 +27,31 @@ window.probe = {
     this.pch = new Uint8Array(await (await fetch('/fixture.pch')).arrayBuffer());
     this.archive = new Uint8Array(await (await fetch('/libfixture.a')).arrayBuffer());
   },
-  begin({ header, source, plain = false, debug = false, invalid }) {
+  begin({ header, source, plain = false, binary = false, debug = false, invalid }) {
     this.state = { stdout: '', stderr: '', done: false, events: [] };
     this.seq = 1;
     this.engine.debugger.enabled = debug;
-    this.engine.fs = plain ? { 'main.cpp': source } : {
+    const filename = this.engine.lang === 'python' ? 'main.py' : 'main.cpp';
+    this.engine.fs = plain || binary ? { [filename]: source } : {
       'main.cpp': source,
       'fixture.h': header,
       'excluded.cpp': '#error source selection must exclude this file'
     };
-    this.engine.binaryFiles = plain ? {} : {
+    this.engine.binaryFiles = binary ? { '/images/雪.bin': new Uint8Array([0, 255, 128, 192, 10, 13, 0, 42]) } : plain ? {} : {
       '/fixture.pch': this.pch.slice(),
       '/libfixture.a': this.archive.slice()
     };
-    this.engine.cppArtifacts = plain ? undefined : {
+    this.engine.cppArtifacts = plain || binary ? undefined : {
       sources: ['/main.cpp'], archives: ['/libfixture.a'], precompiledHeader: '/fixture.pch'
     };
     if (invalid === 'source') this.engine.cppArtifacts.sources = ['/missing.cpp'];
     if (invalid === 'empty sources') this.engine.cppArtifacts.sources = [];
     if (invalid === 'missing archive') this.engine.cppArtifacts.archives = ['/missing.a'];
     if (invalid === 'missing PCH') this.engine.cppArtifacts.precompiledHeader = '/missing.pch';
+    if (invalid === 'collision') this.engine.binaryFiles['/' + filename] = new Uint8Array([1]);
+    if (invalid === 'relative path') this.engine.binaryFiles['images/relative'] = new Uint8Array([1]);
+    if (invalid === 'path alias') this.engine.binaryFiles['/images//alias'] = new Uint8Array([1]);
+    if (invalid === 'artifacts') this.engine.cppArtifacts = { archives: [] };
     if (invalid === 'binary path') this.engine.binaryFiles['/bad/../file'] = new Uint8Array([1]);
     if (invalid === 'corrupt archive') this.engine.binaryFiles['/libfixture.a'] = new Uint8Array([1, 2, 3]);
     this.engine.run().then(result => {
@@ -91,13 +96,13 @@ async function begin(options = {}) {
     ...options
   });
 }
-async function complete(label, success = true) {
+async function complete(label, success = true, stdout = 'ARTIFACT RESULT: 42\n') {
   await page.waitForFunction(() => window.probe.state.done, undefined, { timeout: 120_000 });
   const state = await page.evaluate(() => window.probe.state);
   if (success) {
     assert.equal(state.result?.type, 'completed', JSON.stringify(state));
     assert.equal(state.result.exitCode, 0, JSON.stringify(state));
-    assert.equal(state.stdout, 'ARTIFACT RESULT: 42\n', JSON.stringify(state));
+    assert.equal(state.stdout, stdout, JSON.stringify(state));
   } else {
     assert.ok(
       state.result?.type === 'error' ||
@@ -194,6 +199,85 @@ try {
     source: '#include <cstdio>\nint main() { printf("ARTIFACT RESULT: %d\\n", 42); }\n'
   });
   await complete('Plain source remains compatible after artifact errors');
+  const programs = {
+    python: `import os
+expected = bytes([0, 255, 128, 192, 10, 13, 0, 42])
+data = open('/images/雪.bin', 'rb').read()
+assert data == expected
+assert '雪.bin' in os.listdir('/images')
+assert not os.path.exists('/images/result.bin')
+open('/images/result.bin', 'wb').write(data)
+assert open('/images/result.bin', 'rb').read() == expected
+print('BINARY RESULT: 42')
+`,
+    c: `#include <cstdio>
+#include <cstring>
+int main() {
+  unsigned char expected[] = {0, 255, 128, 192, 10, 13, 0, 42}, data[8];
+  FILE *input = fopen("/images/雪.bin", "rb");
+  if (!input || fread(data, 1, 8, input) != 8 || memcmp(data, expected, 8)) return 1;
+  fclose(input);
+  if (fopen("/images/result.bin", "rb")) return 2;
+  FILE *output = fopen("/images/result.bin", "wb");
+  if (!output || fwrite(data, 1, 8, output) != 8) return 3;
+  fclose(output);
+  input = fopen("/images/result.bin", "rb");
+  if (!input || fread(data, 1, 8, input) != 8 || memcmp(data, expected, 8)) return 4;
+  fclose(input);
+  printf("BINARY RESULT: 42\\n");
+}
+`
+  };
+  for (const lang of ['python', 'c']) {
+    await page.evaluate((lang) => window.probe.create(lang), lang);
+    for (const debug of [false, true]) {
+      await begin({ binary: true, source: programs[lang], debug });
+      if (debug) {
+        await page.waitForFunction(() =>
+          window.probe.state.events.some((event) => event.event === 'initialized')
+        );
+        await page.evaluate((lang) => {
+          const probe = window.probe;
+          const response = probe.send('setBreakpoints', {
+            source: { path: lang === 'python' ? '/main.py' : '/main.cpp' },
+            breakpoints: [{ line: lang === 'python' ? 3 : 5 }]
+          });
+          if (!response?.body?.breakpoints?.some((breakpoint) => breakpoint.verified))
+            throw new Error('Unverified breakpoint');
+          probe.send('configurationDone');
+        }, lang);
+        await page.waitForFunction(
+          () => window.probe.state.events.some((event) => event.event === 'stopped'),
+          undefined,
+          { timeout: 120_000 }
+        );
+        await page.evaluate(() =>
+          window.probe.send('continue', {
+            threadId: window.probe.state.events.find((event) => event.event === 'stopped').body
+              .threadId
+          })
+        );
+      }
+      await complete(
+        `${lang} ${debug ? 'Debug' : 'Run'}: binary bytes, Unicode path, guest writes, isolated outputs`,
+        true,
+        'BINARY RESULT: 42\n'
+      );
+    }
+    for (const invalid of [
+      'collision',
+      'relative path',
+      'path alias',
+      'binary path',
+      ...(lang === 'python' ? ['artifacts'] : [])
+    ]) {
+      await begin({ binary: true, source: programs[lang], invalid });
+      const state = await complete(`${lang}: reject ${invalid}`, false);
+      assert.equal(state.result.type, 'error', JSON.stringify(state));
+      assert.equal(state.result.error.type, 'EngineError');
+      assert.match(state.result.error.message, /binary input|Binary build inputs/i);
+    }
+  }
   assert.deepEqual(pageErrors, []);
   console.log(
     JSON.stringify(
