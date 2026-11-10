@@ -1,4 +1,4 @@
-import { type Debugger, Engine, type FileTree, type Process } from 'debugger-sh';
+import { Engine, type FileTree, type Process } from 'debugger-sh';
 import { onTestFinished } from 'vitest';
 
 /** Creates an engine with the given files, disposed when the test finishes. */
@@ -51,41 +51,4 @@ export async function withTool(): Promise<Engine> {
   const { exitCode, stderr } = await output(tool.run('cpp', { cwd: '/src', buildDir: '/bin' }));
   if (exitCode !== 0) throw new Error(stderr);
   return tool;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Message = { event?: string; body?: any };
-
-/** A minimal DAP client. */
-export function dap(dbg: Debugger) {
-  const events: Message[] = [];
-  const waiters: (() => void)[] = [];
-  dbg.on('event', (e) => {
-    events.push(e as Message);
-    waiters.splice(0).forEach((wake) => wake());
-  });
-  let seq = 1;
-  return {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    request: (command: string, args: object = {}): { success: boolean; body: any } =>
-      dbg.send({ type: 'request', seq: seq++, command, arguments: args }) as never,
-    async event(name: string): Promise<Message> {
-      for (;;) {
-        const index = events.findIndex((e) => e.event === name);
-        if (index >= 0) return events.splice(index, 1)[0];
-        await new Promise<void>((wake) => waiters.push(wake));
-      }
-    },
-    /** Completes the DAP handshake, setting breakpoints on `path` first. */
-    async start(path?: string, lines: number[] = []) {
-      this.request('initialize');
-      await this.event('initialized');
-      if (path)
-        this.request('setBreakpoints', {
-          source: { path },
-          breakpoints: lines.map((line) => ({ line }))
-        });
-      this.request('configurationDone');
-    }
-  };
 }
