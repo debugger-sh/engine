@@ -5,6 +5,11 @@
  */
 export const Internals: unique symbol = Symbol();
 
+/** Rejects construction from outside of the library, which passes {@link Internals} as `key`. */
+export function internal(key: unknown): void {
+  if (key !== Internals) throw new TypeError('Illegal constructor');
+}
+
 /** Yields to the event loop. */
 export const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 

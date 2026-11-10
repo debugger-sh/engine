@@ -106,7 +106,7 @@ async function python(ctx: Context<'python'>): Promise<number> {
   if (!args.length && !options.repl) {
     const [script] = await ctx.fs[Internals].raw().glob('/', ['**/*.py'], []);
     if (!script) {
-      ctx.process.error('python: no Python file found');
+      ctx.process[Internals].error('python: no Python file found');
       return 2;
     }
     args = [join(script)];
@@ -146,7 +146,7 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
   const { buildDir = '/build', cxxFlags = [], lldFlags = [], sysroot = 'cpp' } = ctx.options;
   const files = await sources(ctx, ['**/*.{c,cc,cp,cpp,cxx,c++}']);
   if (!files.length) {
-    ctx.process.error('cpp: no sources found');
+    ctx.process[Internals].error('cpp: no sources found');
     return 1;
   }
   const object = (source: string) => join(buildDir, source) + '.o';
@@ -235,7 +235,7 @@ async function rust(ctx: Context<'rust'>): Promise<number> {
   const { buildDir = '/build', rustFlags = [], sysroot = 'rust' } = ctx.options;
   const files = await sources(ctx, ['**/*.rs']);
   if (!files.length) {
-    ctx.process.error('rust: no sources found');
+    ctx.process[Internals].error('rust: no sources found');
     return 1;
   }
   const object = (source: string) => join(buildDir, source) + '.o';

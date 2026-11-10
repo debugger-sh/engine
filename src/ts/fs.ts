@@ -1,5 +1,5 @@
 import { Fs } from '../../pkg/engine';
-import { Internals, join } from './util';
+import { internal, Internals, join } from './util';
 
 /** A file timestamp. Either an ISO 8601 string, a Date, or a milliseconds epoch. */
 export type Timestamp = string | Date | number;
@@ -66,14 +66,17 @@ const encoder = new TextEncoder();
  * Relative paths are relative to the root folder (`data.txt` is the same as `/data.txt`).
  */
 export class Filesystem {
-  [Internals]: {
+  /** @internal */
+  readonly [Internals]: {
     /** The underlying filesystem, whose operations take care of locking. */
     raw(): Fs;
     dispose(): void;
     readonly ptr: number;
   };
 
-  constructor(fs: Fs) {
+  /** @internal */
+  constructor(key: typeof Internals, fs: Fs) {
+    internal(key);
     let current: Fs | undefined = fs;
     const ptr = fs.ptr();
     this[Internals] = {
@@ -89,7 +92,7 @@ export class Filesystem {
     };
   }
 
-  private get raw(): Fs {
+  get #raw(): Fs {
     return this[Internals].raw();
   }
 
@@ -112,10 +115,10 @@ export class Filesystem {
       if (!response.ok) throw new Error(`Failed to fetch ${fs} (${response.status})`);
       fs = new Uint8Array(await response.arrayBuffer());
     }
-    if (fs instanceof Uint8Array) return this.raw.mount(at, fs);
+    if (fs instanceof Uint8Array) return this.#raw.mount(at, fs);
 
     const mount = async (dir: string, tree: FileTree) => {
-      await this.raw.mkdir(dir, true);
+      await this.#raw.mkdir(dir, true);
       for (const [name, node] of Object.entries(tree)) {
         const path = join(dir, name);
         if (typeof node === 'object' && 'files' in node) {
@@ -124,7 +127,7 @@ export class Filesystem {
         }
         const file =
           typeof node === 'string' || node instanceof Uint8Array ? { contents: node } : node;
-        await this.raw.writeFile(path, bytes(file), time(file.modified), time(file.accessed));
+        await this.#raw.writeFile(path, bytes(file), time(file.modified), time(file.accessed));
       }
     };
     await mount(at, fs);
@@ -136,10 +139,10 @@ export class Filesystem {
   async export(options: ExportOptions = {}): Promise<FileTree | Uint8Array> {
     const { format = 'tree', include = ['**/*'], exclude = [] } = options;
     const at = join(options.at ?? '/');
-    if (format !== 'tree') return this.raw.archive(at, include, exclude, format === 'zip');
+    if (format !== 'tree') return this.#raw.archive(at, include, exclude, format === 'zip');
 
     const root: Directory = { files: {} };
-    for (const entry of await this.raw.glob(at, include, exclude)) {
+    for (const entry of await this.#raw.glob(at, include, exclude)) {
       const parts = entry.replace(/\/$/, '').split('/');
       const name = parts.pop()!;
       let dir = root;
@@ -148,9 +151,9 @@ export class Filesystem {
         dir.files[name] ??= { files: {} };
       } else {
         const path = join(at, entry);
-        const [, , modified, accessed, created] = await this.raw.stat(path);
+        const [, , modified, accessed, created] = await this.#raw.stat(path);
         dir.files[name] = {
-          ...encode(await this.raw.readFile(path)),
+          ...encode(await this.#raw.readFile(path)),
           modified: iso(modified),
           accessed: iso(accessed),
           created: iso(created)
@@ -163,34 +166,34 @@ export class Filesystem {
   readFile(path: string, encoding: 'utf8'): Promise<string>;
   readFile(path: string): Promise<Uint8Array>;
   async readFile(path: string, encoding?: 'utf8'): Promise<Uint8Array | string> {
-    const contents = await this.raw.readFile(path);
+    const contents = await this.#raw.readFile(path);
     return encoding === 'utf8' ? new TextDecoder().decode(contents) : contents;
   }
 
   async writeFile(path: string, contents: string | Uint8Array): Promise<void> {
-    return this.raw.writeFile(path, bytes({ contents }));
+    return this.#raw.writeFile(path, bytes({ contents }));
   }
 
   async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
-    return this.raw.mkdir(path, options?.recursive ?? false);
+    return this.#raw.mkdir(path, options?.recursive ?? false);
   }
 
   async remove(path: string, options?: { recursive?: boolean }): Promise<void> {
-    return this.raw.remove(path, options?.recursive ?? false);
+    return this.#raw.remove(path, options?.recursive ?? false);
   }
 
   async rename(from: string, to: string): Promise<void> {
-    return this.raw.rename(from, to);
+    return this.#raw.rename(from, to);
   }
 
   async stat(path: string): Promise<FileStat> {
-    const [isDir, size, modified, accessed, created] = await this.raw.stat(path);
+    const [isDir, size, modified, accessed, created] = await this.#raw.stat(path);
     return { kind: isDir ? 'directory' : 'file', size, modified, accessed, created };
   }
 
   /** Lists the names of the entries in a directory. */
   async readDir(path: string): Promise<string[]> {
-    return this.raw.readDir(path);
+    return this.#raw.readDir(path);
   }
 }
 

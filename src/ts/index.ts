@@ -13,7 +13,7 @@ import {
   type ToolchainOptionsMap,
   toolchains
 } from './toolchains';
-import { Internals } from './util';
+import { internal, Internals } from './util';
 
 /**
  * A command to run: a language toolchain or built-in command, or a WASI executable
@@ -79,9 +79,9 @@ export class Engine {
   /** The shared, in-memory filesystem of this engine. */
   public readonly fs: Filesystem;
 
-  private readonly pool: Pool;
-  private readonly processes = new Set<Process>();
-  private disposed = false;
+  readonly #pool: Pool;
+  readonly #processes = new Set<Process>();
+  #disposed = false;
 
   /** Creates an engine. */
   static async create(): Promise<Engine> {
@@ -93,12 +93,15 @@ export class Engine {
       const exports = await init({ module_or_path: module });
       return { module, exports };
     })();
-    return new Engine(await runtime);
+    return new Engine(Internals, await runtime);
   }
 
-  private constructor({ module, exports }: { module: WebAssembly.Module; exports: InitOutput }) {
-    this.fs = new Filesystem(new Fs());
-    this.pool = new Pool((gate) => {
+  /** @internal */
+  constructor(key: typeof Internals, runtime: { module: WebAssembly.Module; exports: InitOutput }) {
+    internal(key);
+    const { module, exports } = runtime;
+    this.fs = new Filesystem(Internals, new Fs());
+    this.#pool = new Pool((gate) => {
       const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
       worker.postMessage({ type: 'init', module, memory: exports.memory, gate });
       return worker;
@@ -107,10 +110,10 @@ export class Engine {
 
   /** Kills any running processes and releases the memory held by the engine. */
   public dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
-    for (const process of this.processes) process.kill();
-    this.pool.dispose();
+    if (this.#disposed) return;
+    this.#disposed = true;
+    for (const process of this.#processes) process.kill();
+    this.#pool.dispose();
     this.fs[Internals].dispose();
   }
 
@@ -144,54 +147,60 @@ export class Engine {
     args?: string[] | (BaseOptions & PythonFilter),
     options?: BaseOptions & PythonFilter
   ): Process {
-    if (this.disposed) throw new Error('The engine has been disposed');
+    if (this.#disposed) throw new Error('The engine has been disposed');
     if (!Array.isArray(args)) [args, options] = [[], args];
     options ??= {};
 
-    const stdio = { stdin: new Stdin(), stdout: new Stdout(), stderr: new Stdout() };
-    const debug = options.debug ? new Debugger(options.filterInternals) : undefined;
-    const process = this.spawn(stdio, debug, command, args, options);
+    const stdio = {
+      stdin: new Stdin(Internals),
+      stdout: new Stdout(Internals),
+      stderr: new Stdout(Internals)
+    };
+    const debug = options.debug ? new Debugger(Internals, options.filterInternals) : undefined;
+    const process = this.#spawn(stdio, debug, command, args, options);
 
-    this.processes.add(process);
+    this.#processes.add(process);
     const finish = () => {
-      this.processes.delete(process);
+      this.#processes.delete(process);
       debug?.[Internals].receive({ type: 'stop' });
     };
     process.then(finish, finish);
     return process;
   }
 
-  private spawn(
+  #spawn(
     stdio: Stdio,
     debug: Debugger | undefined,
     command: CommandLike,
     args: string[],
     options: StepOptions
   ): Process {
-    return new Process(stdio, debug, (process) => this.exec(process, command, args, options));
+    return new Process(Internals, stdio, debug, (process) =>
+      this.#exec(process, command, args, options)
+    );
   }
 
-  private async exec(
+  async #exec(
     process: Process,
     command: CommandLike,
     args: string[],
     options: StepOptions
   ): Promise<number> {
-    if (command instanceof Uint8Array) return this.job(process, { bytes: command }, args, options);
-    if (/^https?:\/\//.test(command)) return this.job(process, { url: command }, args, options);
+    if (command instanceof Uint8Array) return this.#job(process, { bytes: command }, args, options);
+    if (/^https?:\/\//.test(command)) return this.#job(process, { url: command }, args, options);
     if (command.startsWith('/') || command.startsWith('.'))
-      return this.job(process, { path: command }, args, options);
+      return this.#job(process, { path: command }, args, options);
     if (Object.hasOwn(toolchains, command))
-      return this.toolchain(process, command as Toolchain, args, options);
+      return this.#toolchain(process, command as Toolchain, args, options);
     if (Object.hasOwn(commands, command)) {
       const [url, name] = commands[command];
-      return this.job(process, { url }, args, { name, ...options });
+      return this.#job(process, { url }, args, { name, ...options });
     }
-    process.error(`${command}: command not found`);
+    process[Internals].error(`${command}: command not found`);
     return 127;
   }
 
-  private toolchain(
+  #toolchain(
     process: Process,
     name: Toolchain,
     args: string[],
@@ -206,14 +215,14 @@ export class Engine {
       process,
       run: async (command, args, step = {}) => {
         const stdio = { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr };
-        const child = this.spawn(stdio, process.debugger, command, args, { env, ...step });
-        const release = process.onKill(() => child.kill());
+        const child = this.#spawn(stdio, process.debugger, command, args, { env, ...step });
+        const release = process[Internals].onKill(() => child.kill());
         const { exitCode } = await child;
         release();
         return exitCode;
       },
       sysroot: async (name) => {
-        const sysroot = await this.sysroot(sysrootUrl(name));
+        const sysroot = await this.#sysroot(sysrootUrl(name));
         return isFailure(sysroot) ? undefined : sysroot;
       }
     };
@@ -221,14 +230,14 @@ export class Engine {
   }
 
   /** Loads a sysroot in a worker (fetching and extracting it in shared memory). */
-  private sysroot(url: string): Promise<Fs | Failure> {
+  #sysroot(url: string): Promise<Fs | Failure> {
     return cached(sysrootCache, url, async () => {
-      const worker = await this.pool.acquire();
+      const worker = await this.#pool.acquire();
       const message = await new Promise<WorkerMessage>((resolve) => {
         worker.worker.addEventListener('message', (e) => resolve(e.data), { once: true });
         worker.worker.postMessage({ type: 'sysroot', url });
       });
-      this.pool.release(worker);
+      this.#pool.release(worker);
       if (message.type === 'error') throw new Error(String(message.message));
       if (message.ptr === undefined) return [127, `network error (${message.status})`];
       return Fs.from_ptr(message.ptr as number);
@@ -236,19 +245,22 @@ export class Engine {
   }
 
   /** Runs a single WASI program on a worker. */
-  private async job(
+  async #job(
     process: Process,
     program: { bytes?: Uint8Array; url?: string; path?: string },
     args: string[],
     options: StepOptions
   ): Promise<number> {
     const name = options.name ?? program.path ?? program.url ?? 'main';
-    const fail = ([code, message]: Failure) => (process.error(`${name}: ${message}`), code);
+    const fail = ([code, message]: Failure) => (
+      process[Internals].error(`${name}: ${message}`),
+      code
+    );
     const debug = options.debug === 'python' ? 'python' : options.debug ? 'wasm' : undefined;
 
     let sysroot: number | undefined;
     if (options.sysroot) {
-      const loaded = await this.sysroot(sysrootUrl(options.sysroot));
+      const loaded = await this.#sysroot(sysrootUrl(options.sysroot));
       if (isFailure(loaded)) return fail(loaded);
       sysroot = loaded.ptr();
     }
@@ -279,11 +291,11 @@ export class Engine {
       env: Object.entries(options.env ?? {}),
       workspace: this.fs[Internals].ptr,
       sysroot,
-      stdin: process.stdin.buffer,
+      stdin: process.stdin[Internals].buffer,
       debug
     };
 
-    const worker = await this.pool.acquire();
+    const worker = await this.#pool.acquire();
     return new Promise<number>((resolve, reject) => {
       let release = () => {};
       const done = (finish: () => void) => {
@@ -296,15 +308,17 @@ export class Engine {
         if (data.type === 'stdout')
           (data.mode === 2 ? process.stderr : process.stdout).emit('data', data.data as Uint8Array);
         else if (data.type === 'exit')
-          done(() => (this.pool.release(worker), resolve(data.code as number)));
+          done(() => (this.#pool.release(worker), resolve(data.code as number)));
         else if (data.type === 'error')
-          done(() => (void this.pool.kill(worker), reject(new Error(String(data.message)))));
+          done(() => (void this.#pool.kill(worker), reject(new Error(String(data.message)))));
         else if (debug) process.debugger?.[Internals].receive(data);
       };
       const onError = (e: ErrorEvent) =>
-        done(() => (void this.pool.kill(worker), reject(e.error ?? new Error(e.message))));
+        done(() => (void this.#pool.kill(worker), reject(e.error ?? new Error(e.message))));
       // A killed job's worker is terminated, and replaced (lazily) by a fresh one.
-      release = process.onKill(() => done(() => (void this.pool.kill(worker), resolve(137))));
+      release = process[Internals].onKill(() =>
+        done(() => (void this.#pool.kill(worker), resolve(137)))
+      );
 
       worker.worker.addEventListener('message', onMessage);
       worker.worker.addEventListener('error', onError);
@@ -315,7 +329,7 @@ export class Engine {
 
 type PythonFilter = { filterInternals?: boolean };
 
-export { Artifact, Debugger } from './debugger';
+export type { Artifact, Debugger } from './debugger';
 export type {
   Directory,
   ExportOptions,
@@ -326,9 +340,9 @@ export type {
   Timestamp,
   Timestamps
 } from './fs';
-export { Filesystem } from './fs';
+export type { Filesystem } from './fs';
 export type { ProcessResult } from './process';
-export { Process, Stdin, Stdout } from './process';
+export type { Process, Stdin, Stdout } from './process';
 export type {
   BaseOptions,
   CppOptions,

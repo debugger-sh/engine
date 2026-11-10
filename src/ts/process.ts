@@ -2,7 +2,7 @@ import EventEmitter from 'events';
 
 import { gate_doom, gate_idle, gate_new } from '../../pkg/engine';
 import type { Debugger } from './debugger';
-import { tick } from './util';
+import { internal, Internals, tick } from './util';
 
 export interface ProcessResult {
   /**
@@ -32,57 +32,78 @@ export class Process implements PromiseLike<ProcessResult> {
   /** The debugger for this process. Present only if `debug: true` was passed. */
   public readonly debugger?: Debugger;
 
-  private readonly result: Promise<ProcessResult>;
-  private readonly killers = new Set<() => void>();
-  private finished = false;
-  private killed = false;
+  /** @internal */
+  readonly [Internals]: {
+    /**
+     * Registers a function to run if this process is killed, returning a function which
+     * unregisters it. If the process has already been killed, it runs immediately.
+     */
+    onKill(kill: () => void): () => void;
+    /** Writes a message to this process' stderr. */
+    error(message: string): void;
+  };
 
-  constructor(stdio: Stdio, debug: Debugger | undefined, body: (proc: Process) => Promise<number>) {
+  readonly #result: Promise<ProcessResult>;
+  readonly #killers = new Set<() => void>();
+  #finished = false;
+  #killed = false;
+
+  /** @internal */
+  constructor(
+    key: typeof Internals,
+    stdio: Stdio,
+    debug: Debugger | undefined,
+    body: (proc: Process) => Promise<number>
+  ) {
+    internal(key);
     ({ stdin: this.stdin, stdout: this.stdout, stderr: this.stderr } = stdio);
     this.debugger = debug;
+    this[Internals] = {
+      onKill: (kill) => {
+        if (this.#killed) kill();
+        this.#killers.add(kill);
+        return () => void this.#killers.delete(kill);
+      },
+      error: (message) => this.stderr.emit('data', encoder.encode(`${message}\n`))
+    };
 
     let kill!: (result: ProcessResult) => void;
     const killed = new Promise<ProcessResult>((resolve) => (kill = resolve));
-    this.killers.add(() => kill({ exitCode: 137, killed: true }));
+    this.#killers.add(() => kill({ exitCode: 137, killed: true }));
 
     // Start the body on the next tick, so that callers can attach listeners first.
     const ran = tick().then(() => body(this));
-    this.result = Promise.race([ran.then((exitCode) => ({ exitCode, killed: false })), killed]);
-    this.result.finally(() => (this.finished = true)).catch(() => {});
+    this.#result = Promise.race([ran.then((exitCode) => ({ exitCode, killed: false })), killed]);
+    this.#result.finally(() => (this.#finished = true)).catch(() => {});
   }
 
   then<T = ProcessResult, E = never>(
     onfulfilled?: ((value: ProcessResult) => T | PromiseLike<T>) | null,
     onrejected?: ((reason: unknown) => E | PromiseLike<E>) | null
   ): Promise<T | E> {
-    return this.result.then(onfulfilled, onrejected);
+    return this.#result.then(onfulfilled, onrejected);
   }
 
   /** Immediately kills this process (and any steps it is running). */
   kill(): void {
-    if (this.finished || this.killed) return;
-    this.killed = true;
-    for (const kill of this.killers) kill();
-  }
-
-  /**
-   * Registers a function to run if this process is killed, until `release` is called.
-   * If the process has already been killed, it runs immediately.
-   * @internal
-   */
-  onKill(kill: () => void): () => void {
-    if (this.killed) kill();
-    this.killers.add(kill);
-    return () => void this.killers.delete(kill);
-  }
-
-  /** Writes a message to this process' stderr. @internal */
-  error(message: string) {
-    this.stderr.emit('data', encoder.encode(`${message}\n`));
+    if (this.#finished || this.#killed) return;
+    this.#killed = true;
+    for (const kill of this.#killers) kill();
   }
 }
 
-export class Stdout extends EventEmitter<{ data: [Uint8Array] }> {}
+/** A process' standard output or error. Listen to chunks with `on('data', …)`. */
+export class Stdout extends EventEmitter<{ data: [Uint8Array] }> {
+  /** @internal */
+  constructor(key: typeof Internals) {
+    super();
+    internal(key);
+  }
+}
+
+const SIZE = 4096;
+const HEADER = 16;
+const DATA = SIZE - HEADER;
 
 /**
  * A process' standard input, backed by a ring buffer shared with its workers.
@@ -92,54 +113,54 @@ export class Stdout extends EventEmitter<{ data: [Uint8Array] }> {}
  * write and on close, so that a blocked reader never misses a wakeup.
  */
 export class Stdin {
-  private static readonly SIZE = 4096;
-  private static readonly HEADER = 16;
-  private static readonly DATA = Stdin.SIZE - Stdin.HEADER;
+  /** @internal */
+  readonly [Internals] = { buffer: new SharedArrayBuffer(SIZE) };
+  readonly #indices = new Int32Array(this[Internals].buffer, 0, 4);
+  readonly #data = new Uint8Array(this[Internals].buffer, HEADER);
 
   /** @internal */
-  public readonly buffer = new SharedArrayBuffer(Stdin.SIZE);
-  private readonly indices = new Int32Array(this.buffer, 0, 4);
-  private readonly data = new Uint8Array(this.buffer, Stdin.HEADER);
+  constructor(key: typeof Internals) {
+    internal(key);
+  }
 
   /** Whether {@link close} has been called. */
   public get closed(): boolean {
-    return Atomics.load(this.indices, 3) !== 0;
+    return Atomics.load(this.#indices, 3) !== 0;
   }
 
   /** Writes a chunk, waiting for space in the buffer as needed. */
   public async write(value: Uint8Array | string): Promise<void> {
     if (this.closed) throw new Error('stdin is closed');
     const chunk = typeof value === 'string' ? encoder.encode(value) : value;
-    const N = Stdin.DATA;
     let offset = 0;
 
     while (offset < chunk.length) {
-      const read = Atomics.load(this.indices, 0);
-      const write = Atomics.load(this.indices, 1);
+      const read = Atomics.load(this.#indices, 0);
+      const write = Atomics.load(this.#indices, 1);
       // One slot is always kept empty to distinguish full from empty.
-      const free = (read - write - 1 + N) % N;
+      const free = (read - write - 1 + DATA) % DATA;
       if (free === 0) {
-        await Atomics.waitAsync(this.indices, 0, read).value;
+        await Atomics.waitAsync(this.#indices, 0, read).value;
         continue;
       }
 
-      const count = Math.min(chunk.length - offset, free, N - write);
-      this.data.set(chunk.subarray(offset, offset + count), write);
-      Atomics.store(this.indices, 1, (write + count) % N);
-      this.notify();
+      const count = Math.min(chunk.length - offset, free, DATA - write);
+      this.#data.set(chunk.subarray(offset, offset + count), write);
+      Atomics.store(this.#indices, 1, (write + count) % DATA);
+      this.#notify();
       offset += count;
     }
   }
 
   /** Closes stdin: once the buffer is drained, readers observe end-of-file. */
   public close(): void {
-    Atomics.store(this.indices, 3, 1);
-    this.notify();
+    Atomics.store(this.#indices, 3, 1);
+    this.#notify();
   }
 
-  private notify() {
-    Atomics.add(this.indices, 2, 1);
-    Atomics.notify(this.indices, 2);
+  #notify() {
+    Atomics.add(this.#indices, 2, 1);
+    Atomics.notify(this.#indices, 2);
   }
 }
 
