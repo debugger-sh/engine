@@ -1,29 +1,28 @@
 //! A worker is a stateless executor: the main thread sends it jobs, each of which
 //! runs one WASI program to completion on top of the shared filesystem.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::io::Write;
 
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wasmer::{Instance, Module, Store};
-use wasmer_wasix::virtual_fs::{AsyncReadExt, FileSystem, VirtualFile};
+use wasmer_wasix::virtual_fs::{AsyncReadExt, FileSystem};
 use wasmer_wasix::{WasiEnv, WasiError, WasiFunctionEnv};
 
 use crate::debug::instrument::{InstrumenterResult, instrument_wasm};
 use crate::fs::{Root, Shared, normalize};
 use crate::python::worker::BRIDGE;
-use crate::python::worker::debuggee::PythonDebuggee;
-use crate::types::{StdoutMode, WorkerOut};
+use crate::types::WorkerOut;
+use crate::util::weak_error;
 
 use debuggee::Debuggee;
 use gate::Gate;
-use io::{Stdin, Stdout};
+use io::{Device, PipeDevice};
 use runtime::JsRuntime;
 
 mod debuggee;
 pub mod gate;
-mod io;
+pub mod io;
 mod runtime;
 
 /// How a job should be debugged.
@@ -53,8 +52,14 @@ pub struct Job {
     env: Vec<(String, String)>,
     workspace: u32,
     sysroot: Option<u32>,
+    /// The buffers of the [`PipeDevice`]s used as standard I/O.
     #[serde(with = "serde_wasm_bindgen::preserve")]
     stdin: js_sys::SharedArrayBuffer,
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    stdout: js_sys::SharedArrayBuffer,
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    stderr: js_sys::SharedArrayBuffer,
+    devices: Vec<Device>,
     debug: Option<Debug>,
 }
 
@@ -96,34 +101,28 @@ pub async fn worker_run(job: JsValue) -> Result<i32, JsError> {
     run(job).await
 }
 
-fn fail(name: &str, code: i32, message: impl std::fmt::Display) -> Result<i32, JsError> {
-    let message = format!("{name}: {message}\n");
-    WorkerOut::Stdout { data: message.as_bytes(), mode: StdoutMode::Err }.send();
-    Ok(code)
-}
-
 async fn run(job: Job) -> Result<i32, JsError> {
-    let Job { name, module, bytes, path, mut args, env, workspace, sysroot, stdin, debug } = job;
+    let Job { name, module, bytes, path, mut args, env, workspace, sysroot, stdin, stdout, stderr, devices, debug } = job;
     let workspace = unsafe { Shared::from_ptr(workspace) };
     let sysroot = sysroot.map(|ptr| unsafe { Shared::from_ptr(ptr) });
+    let fail = |code: i32, message: &str| -> Result<i32, JsError> {
+        let message = format!("{name}: {message}\n");
+        weak_error!(PipeDevice::new(&stderr, Some(2)).write_all(message.as_bytes()));
+        Ok(code)
+    };
 
-    /* The Python debugger talks to the bridge through a private device file */
-    let mut device = None;
+    /* The Python debugger talks to the bridge through its devices (see `bridge.py`) */
     if debug == Some(Debug::Python) {
-        let debuggee = PythonDebuggee::new();
-        debuggee.send_and_wait();
-        let open = move || Box::new(debuggee.debug_file()) as Box<dyn VirtualFile + Send + Sync>;
-        device = Some((PathBuf::from("/__debug__"), Arc::new(open) as _));
         args.splice(0..0, ["-c".to_string(), BRIDGE.to_string()]);
     }
-    let fs = Root::new(workspace, sysroot, device);
+    let fs = Root::new(workspace, sysroot, devices);
 
     /* Resolve the program */
     let bytes = match (bytes, path) {
         (Some(bytes), _) => Some(bytes),
         (None, Some(path)) => match fs.metadata(&normalize(&path)) {
-            Err(_) => return fail(&name, 127, "command not found"),
-            Ok(metadata) if metadata.is_dir() => return fail(&name, 126, "cannot execute"),
+            Err(_) => return fail(127, "command not found"),
+            Ok(metadata) if metadata.is_dir() => return fail(126, "cannot execute"),
             Ok(_) => {
                 let mut file = fs.new_open_options().read(true).open(normalize(&path))?;
                 let mut bytes = Vec::new();
@@ -140,7 +139,7 @@ async fn run(job: Job) -> Result<i32, JsError> {
         (Some(wasm), true) => {
             WorkerOut::Artifact { data: &wasm, name: "pre.wasm".into() }.send();
             let Ok(InstrumenterResult { info, wasm }) = instrument_wasm(&wasm) else {
-                return fail(&name, 126, "cannot execute");
+                return fail(126, "cannot execute");
             };
             WorkerOut::Artifact { data: &wasm, name: "post.wasm".into() }.send();
             debuggee = Some(Debuggee::new(info));
@@ -153,7 +152,7 @@ async fn run(job: Job) -> Result<i32, JsError> {
     let module = match bytes {
         Some(bytes) => match Module::from_binary(&store, &bytes) {
             Ok(module) => module,
-            Err(_) => return fail(&name, 126, "cannot execute"),
+            Err(_) => return fail(126, "cannot execute"),
         },
         None => Module::from(module.unchecked_into::<js_sys::WebAssembly::Module>()),
     };
@@ -164,9 +163,9 @@ async fn run(job: Job) -> Result<i32, JsError> {
         .envs(env)
         .runtime(JsRuntime::instance())
         .fs(Box::new(fs))
-        .stdout(Box::new(Stdout::new(StdoutMode::Out)))
-        .stderr(Box::new(Stdout::new(StdoutMode::Err)))
-        .stdin(Box::new(Stdin::new(&stdin)));
+        .stdin(Box::new(PipeDevice::new(&stdin, Some(0))))
+        .stdout(Box::new(PipeDevice::new(&stdout, Some(1))))
+        .stderr(Box::new(PipeDevice::new(&stderr, Some(2))));
     builder.add_preopen_dir("/")?;
 
     /* Instantiate the program */
@@ -184,7 +183,7 @@ async fn run(job: Job) -> Result<i32, JsError> {
     };
     let start = instance.ok().and_then(|i| i.exports.get_function("_start").ok().cloned());
     let Some(start) = start else {
-        return fail(&name, 126, "cannot execute");
+        return fail(126, "cannot execute");
     };
 
     /* Run the program, treating `exit(code)` as a normal exit */
@@ -192,7 +191,7 @@ async fn run(job: Job) -> Result<i32, JsError> {
         Ok(_) => Ok(0),
         Err(err) => match err.downcast_ref::<WasiError>() {
             Some(WasiError::Exit(code)) => Ok(code.raw()),
-            _ => fail(&name, 134, err.message()),
+            _ => fail(134, &err.message()),
         },
     }
 }

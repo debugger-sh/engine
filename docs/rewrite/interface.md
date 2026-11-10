@@ -238,9 +238,10 @@ with the following helper types:
 
 ```ts
 interface Process extends PromiseLike<ProcessResult> {
-  readonly stdin: Stdin;
-  readonly stdout: Stdout;
-  readonly stderr: Stdout;
+  /** Pipes (see [devices](./features/devices.md)). */
+  readonly stdin: Writable;
+  readonly stdout: Readable;
+  readonly stderr: Readable;
 
   /**
    * The debugger for this process. Present only if `debug: true` was passed.

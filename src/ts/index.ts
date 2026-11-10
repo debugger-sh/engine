@@ -2,7 +2,7 @@ import init, { Fs, type InitOutput } from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
 import { Filesystem } from './fs';
-import { Pool, Process, Stdin, type Stdio, Stdout, type WorkerMessage } from './process';
+import { Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
 import {
   type BaseOptions,
   commands,
@@ -13,7 +13,7 @@ import {
   type ToolchainOptionsMap,
   toolchains
 } from './toolchains';
-import { internal, Internals } from './util';
+import { internal, Internals, join } from './util';
 
 /**
  * A command to run: a language toolchain or built-in command, or a WASI executable
@@ -151,13 +151,22 @@ export class Engine {
     if (!Array.isArray(args)) [args, options] = [[], args];
     options ??= {};
 
-    const stdio = {
-      stdin: new Stdin(Internals),
-      stdout: new Stdout(Internals),
-      stderr: new Stdout(Internals)
+    const flowing = () => {
+      const pipe = new Pipe();
+      pipe.flow();
+      return pipe;
     };
+    const stdio = {
+      stdin: options.stdin ?? new Pipe(),
+      stdout: options.stdout ?? flowing(),
+      stderr: options.stderr ?? flowing()
+    };
+    // Pipes given to the process (including its own) are closed once it exits.
+    const pipes = [...Object.values(stdio), ...Object.values(options.devices ?? {})].filter(
+      (device): device is Pipe => device instanceof Pipe && device[Internals].close
+    );
     const debug = options.debug ? new Debugger(Internals, options.filterInternals) : undefined;
-    const process = this.#spawn(stdio, debug, command, args, options);
+    const process = this.#spawn(stdio, debug, command, args, options, pipes);
 
     this.#processes.add(process);
     const finish = () => {
@@ -173,10 +182,15 @@ export class Engine {
     debug: Debugger | undefined,
     command: CommandLike,
     args: string[],
-    options: StepOptions
+    options: StepOptions,
+    pipes?: Pipe[]
   ): Process {
-    return new Process(Internals, stdio, debug, (process) =>
-      this.#exec(process, command, args, options)
+    return new Process(
+      Internals,
+      stdio,
+      debug,
+      (process) => this.#exec(process, command, args, options),
+      pipes
     );
   }
 
@@ -214,7 +228,7 @@ export class Engine {
       fs: this.fs,
       process,
       run: async (command, args, step = {}) => {
-        const stdio = { stdin: process.stdin, stdout: process.stdout, stderr: process.stderr };
+        const { stdio } = process[Internals];
         const child = this.#spawn(stdio, process.debugger, command, args, { env, ...step });
         const release = process[Internals].onKill(() => child.kill());
         const { exitCode } = await child;
@@ -282,6 +296,12 @@ export class Engine {
       module = compiled;
     }
 
+    const { stdin, stdout, stderr } = process[Internals].stdio;
+    const python = debug === 'python' ? process.debugger?.[Internals].python() : undefined;
+    const devices = Object.entries({ ...options.devices, ...python }).map(([path, device]) => {
+      const pipe = device instanceof Pipe;
+      return { path: join(path), buffer: pipe ? device[Internals].buffer : device, pipe };
+    });
     const job = {
       name,
       module,
@@ -291,12 +311,15 @@ export class Engine {
       env: Object.entries(options.env ?? {}),
       workspace: this.fs[Internals].ptr,
       sysroot,
-      stdin: process.stdin[Internals].buffer,
+      stdin: stdin[Internals].buffer,
+      stdout: stdout[Internals].buffer,
+      stderr: stderr[Internals].buffer,
+      devices,
       debug
     };
 
     const worker = await this.#pool.acquire();
-    return new Promise<number>((resolve, reject) => {
+    const exited = new Promise<number>((resolve, reject) => {
       let release = () => {};
       const done = (finish: () => void) => {
         worker.worker.removeEventListener('message', onMessage);
@@ -305,9 +328,7 @@ export class Engine {
         finish();
       };
       const onMessage = ({ data }: MessageEvent<WorkerMessage>) => {
-        if (data.type === 'stdout')
-          (data.mode === 2 ? process.stderr : process.stdout).emit('data', data.data as Uint8Array);
-        else if (data.type === 'exit')
+        if (data.type === 'exit')
           done(() => (this.#pool.release(worker), resolve(data.code as number)));
         else if (data.type === 'error')
           done(() => (void this.#pool.kill(worker), reject(new Error(String(data.message)))));
@@ -324,6 +345,8 @@ export class Engine {
       worker.worker.addEventListener('error', onError);
       worker.worker.postMessage({ type: 'run', job });
     });
+    // The Python debugger's pipes belong to this job.
+    return exited.finally(() => Object.values(python ?? {}).forEach((pipe) => pipe.close()));
   }
 }
 
@@ -341,8 +364,9 @@ export type {
   Timestamps
 } from './fs';
 export type { Filesystem } from './fs';
-export type { ProcessResult } from './process';
-export type { Process, Stdin, Stdout } from './process';
+export type { Device, PipeOptions, ProcessResult, Readable, Writable } from './process';
+export type { Process } from './process';
+export { Pipe } from './process';
 export type {
   BaseOptions,
   CppOptions,

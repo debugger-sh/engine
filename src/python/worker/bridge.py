@@ -1,5 +1,10 @@
 import bdb, json, os, sys
 
+# Pipes to and from the main thread (see `Debugger` in `src/ts/debugger.ts`), which carry
+# one JSON message per line: commands (from `debug.rs`) and pause snapshots.
+COMMANDS = '/__debug__/commands'
+PAUSES = '/__debug__/pauses'
+
 # Resume commands from the main thread. Must match PYTHON_CMD_* in debug.rs.
 CONTINUE   = 0
 STEP_OVER  = 1
@@ -89,7 +94,8 @@ def mapping_pairs(mapping):
 class DapBridge(bdb.Bdb):
     def __init__(self):
         super().__init__()
-        self._dbg = open('/__debug__', 'r+b', buffering=0)
+        self._commands = open(COMMANDS, 'rb')
+        self._pauses = open(PAUSES, 'wb')
         self._stepping = False
         self._nodes = 0
 
@@ -131,15 +137,8 @@ class DapBridge(bdb.Bdb):
     # ── debug channel ────────────────────────────────────────────────────────
 
     def _read_response(self):
-        data = b''
-        while True:
-            chunk = self._dbg.read(512)
-            if not chunk:
-                break
-            data += chunk
-        if not data:
-            return None
-        return json.loads(data.decode())
+        line = self._commands.readline()
+        return json.loads(line) if line else None
 
     def _apply_config(self, resp):
         self._apply_breakpoints(resp.get("breakpoints", {}))
@@ -210,7 +209,8 @@ class DapBridge(bdb.Bdb):
             "reason": "breakpoint" if self.break_here(frame) else "step",
             "frames": stack,
         }, separators=(',', ':')).encode()
-        self._dbg.write(pause)
+        self._pauses.write(pause + b'\n')
+        self._pauses.flush()
 
         resp = self._read_response()
         if resp is None:

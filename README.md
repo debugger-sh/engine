@@ -62,6 +62,10 @@ const proc = engine.run('cpp', ['program', 'args'], {
   env,
   sysroot,
   debug,
+  stdin, // pipes (by default, new pipes: stdout and stderr flow)
+  stdout,
+  stderr,
+  devices: { '/dev/in': new Pipe(), '/dev/fb': new SharedArrayBuffer(size) },
   ...toolchainOptions
 });
 proc.stdin.write('input');
@@ -70,6 +74,13 @@ proc.stdout.on('data', fn);
 proc.stderr.on('data', fn);
 proc.kill(); // resolves with { exitCode: 137, killed: true }
 await proc; // { exitCode, killed }
+
+// Pipes: buffered byte streams, shared with processes as stdio or devices
+const pipe = new Pipe({ capacity: 4096, close: true }); // closed once a process using it exits
+await pipe.write('bytes');
+await pipe.read(); // or `for await (const chunk of pipe)`, `pipe.lines()`
+pipe.flow(); // consume every chunk as it arrives, firing `data` (and `end`)
+pipe.close();
 
 // Debugging (DAP): the process waits for the handshake
 const debuggable = engine.run('python', { debug: true, filterInternals: true });

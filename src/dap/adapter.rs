@@ -60,14 +60,13 @@ impl DapAdapter {
                 state.borrow_mut().session.try_emit_initialized();
             }
             "python_debug" => {
-                let sab = js_sys::Reflect::get(&data, &"state".into())
-                    .expect("python_debug message has state field");
-                let sab = sab
-                    .dyn_into::<js_sys::SharedArrayBuffer>()
-                    .expect("state is a SharedArrayBuffer");
+                let send = js_sys::Reflect::get(&data, &"send".into())
+                    .expect("python_debug message has send field")
+                    .dyn_into::<js_sys::Function>()
+                    .expect("send is a function");
                 let filter_internals = state.borrow().filter_internals;
                 state.borrow_mut().session.set_debugger(Box::new(PythonBackend::new(
-                    PyDebugger::from_sab(sab),
+                    PyDebugger::new(send),
                     filter_internals,
                 )));
                 state.borrow_mut().session.try_emit_initialized();

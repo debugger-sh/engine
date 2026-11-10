@@ -48,6 +48,7 @@ const TOOL = `
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sys/stat.h>
 
 int main(int argc, char** argv) {
   const char* mode = argc > 1 ? argv[1] : "";
@@ -61,6 +62,7 @@ int main(int argc, char** argv) {
   if (!strcmp(mode, "write")) { FILE* f = fopen(argv[2], "w"); fputs(argv[3], f); fclose(f); }
   if (!strcmp(mode, "spam")) for (;;) { FILE* f = fopen(argv[2], "w"); fputs("spam", f); fclose(f); printf("."); }
   if (!strcmp(mode, "read")) { char b[256] = {0}; FILE* f = fopen(argv[2], "r"); fread(b, 1, 255, f); printf("%s", b); }
+  if (!strcmp(mode, "size")) { struct stat s; printf("%d\\n", stat(argv[2], &s) ? -1 : (int)s.st_size); }
   return 0;
 }
 `;

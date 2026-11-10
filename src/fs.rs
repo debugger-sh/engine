@@ -11,7 +11,6 @@
 use std::io::{self, Cursor, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
@@ -25,6 +24,7 @@ use wasmer_wasix::virtual_fs::{
 };
 
 use crate::worker::gate::Critical;
+use crate::worker::io::Device;
 
 // ╭──────────────────────────────────────────────────────────────────────────╮
 // │ Locking                                                                  │
@@ -227,31 +227,27 @@ impl AsyncSeek for SharedFile {
     }
 }
 
-pub type Device = Arc<dyn Fn() -> Box<dyn VirtualFile + Send + Sync> + Send + Sync>;
-
 /// The root filesystem of a process: the shared workspace with its sysroot overlaid
-/// beneath it (visible only to this process), plus an optional private device file.
+/// beneath it, and its devices on top (both visible only to this process).
 pub struct Root {
     fs: OverlayFileSystem<Shared, Vec<Shared>>,
-    device: Option<(PathBuf, Device)>,
+    devices: Vec<Device>,
 }
 
 impl Root {
-    pub fn new(workspace: Shared, sysroot: Option<Shared>, device: Option<(PathBuf, Device)>) -> Self {
+    pub fn new(workspace: Shared, sysroot: Option<Shared>, devices: Vec<Device>) -> Self {
         let fs = OverlayFileSystem::new(workspace, sysroot.into_iter().collect());
-        Self { fs, device }
+        Self { fs, devices }
+    }
+
+    fn device(&self, path: &Path) -> Option<&Device> {
+        self.devices.iter().find(|device| device.path == path)
     }
 }
 
 impl std::fmt::Debug for Root {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.fs.fmt(f)
-    }
-}
-
-impl Root {
-    fn is_device(&self, path: &Path) -> bool {
-        self.device.as_ref().is_some_and(|(device, _)| device == path)
     }
 }
 
@@ -276,10 +272,15 @@ impl FileSystem for Root {
         self.fs.rename(from, to)
     }
     fn metadata(&self, path: &Path) -> Result<Metadata, FsError> {
-        match self.is_device(path) {
-            true => Ok(Metadata { ft: FileType::new_file(), ..Default::default() }),
-            false => self.fs.metadata(path),
+        if let Some(device) = self.device(path) {
+            return Ok(Metadata { ft: FileType::new_file(), len: device.open().size(), ..Default::default() });
         }
+        // Devices may be placed in directories which don't exist: so that paths to them
+        // resolve, their missing ancestors are shown as directories.
+        self.fs.metadata(path).or_else(|err| match self.devices.iter().any(|d| d.path.starts_with(path)) {
+            true => Ok(Metadata { ft: FileType::new_dir(), ..Default::default() }),
+            false => Err(err),
+        })
     }
     fn symlink_metadata(&self, path: &Path) -> Result<Metadata, FsError> {
         self.metadata(path)
@@ -301,9 +302,9 @@ impl FileOpener for Root {
         path: &Path,
         conf: &OpenOptionsConfig,
     ) -> Result<Box<dyn VirtualFile + Send + Sync>, FsError> {
-        match &self.device {
-            Some((device, open)) if device == path => Ok(open()),
-            _ => self.fs.new_open_options().options(conf.clone()).open(path),
+        match self.device(path) {
+            Some(device) => Ok(device.open()),
+            None => self.fs.new_open_options().options(conf.clone()).open(path),
         }
     }
 }

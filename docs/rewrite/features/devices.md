@@ -91,6 +91,9 @@ interface Writable {
 
   /** Close the stream for writing. Attempting to write again throws. */
   close(): void;
+
+  /** Whether `close()` has been called. */
+  readonly closed: boolean;
 }
 
 interface PipeOptions {
@@ -100,6 +103,14 @@ interface PipeOptions {
    * Defaults to 4096 (4 KiB).
    */
   capacity?: number;
+
+  /**
+   * Whether to close this pipe once a process it was given to (as stdio or as a device)
+   * exits, for any reason. When disabled, the pipe is left open for reuse.
+   *
+   * Defaults to `true`.
+   */
+  close?: boolean;
 }
 
 export class Pipe implements Readable, Writable {
@@ -121,7 +132,7 @@ export class Pipe implements Readable, Writable {
 
 As you can infer from the above, a process may read or write to a pipe such that reads will read its own data. This kind of access pattern is usually not what you want (usually only the host reads and only the guest writes, or vice versa), but this behaviour is not constrained by the library.
 
-Also note that the pipe lifetime is independent from the process lifetime. That is, a pipe can be instantiated independently from a process, shared by multiple processes, etc. Pipes also do not reset either from process to process, such that one process could write to a pipe, and the next could read data written by the previous process, etc.
+Also note that the pipe lifetime is independent from the process lifetime. That is, a pipe can be instantiated independently from a process, shared by multiple processes, etc. Pipes also do not reset either from process to process, such that one process could write to a pipe, and the next could read data written by the previous process, etc. (see below for when pipes are closed).
 
 Note that pipes also support observing their output via callbacks like `pipe.on("data", chunk => /* ... */)`. `on` **does not** affect the state of a pipe (it does not read from the pipe). However, when `read` resolves with non-empty data, `on` fires to anyone who is listening on the pipe. `end` fires when the stream is closed and there is no data remaining in the buffer.
 
@@ -166,7 +177,7 @@ interface Process {
 
 By default, processes that were spawned without explicitly configuring `stdout`/`stderr` will have no readers, and therefore programs that write enough output will eventually block while waiting for a reader on the other end to consume from the buffer. For that reason, and only in the case that `BaseOptions` was not manually configured, the default behaviour of `stdout` and `stderr` is to call `flow` on the pipe used by these processes (this is handled separately for each stream). Listeners to the default `stderr` and `stdout` can still listen to bytes read e.g. via `on("data")`.
 
-It is intended that the creator of a pipe is responsible for closing it. Pipes created externally and passed to the engine should be closed after they are done to avoid infinite reading loops. Pipes created internally by the engine for the default `stdout` and `stderr` will be automatically closed when the process exits.
+By default, a pipe is automatically closed once a process it was given to (as `stdin`, `stdout`, `stderr` or a device) exits for any reason, whether it exited normally, was killed, or failed. This includes the pipes created internally by the engine for the default stdio. For toolchains, pipes are closed once the whole process exits, not when each step does. A pipe created with `close: false` is instead left open when the process exits, so that it can be reused (e.g. by a later process); its creator is then responsible for closing it, to avoid infinite reading loops. Awaiting a process also waits for the flowing pipes it closed to be drained, so that every `data` event has fired by the time it resolves.
 
 For device pipes, processes can indiscriminately read and write to a pipe, potentially seeing its own data. The one exception is standard IO: these system calls should not allow a process to e.g. read from its own stdout, or write to its own stdin. This should be handled directly as an edge case in the implementation of the Wasmer `VirtualFile` needed for devices.
 

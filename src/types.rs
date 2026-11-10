@@ -90,32 +90,11 @@ offset_type!(
     CodeOffset
 );
 
-#[derive(Clone, Copy, Debug, Tsify, Serialize_repr)]
-#[repr(u8)]
-#[tsify(type = "1 | 2")]
-pub enum StdoutMode {
-    Out = 1,
-    Err = 2,
-}
-
 #[derive(Tsify, Serialize)]
 #[serde(tag = "type")]
 pub enum WorkerOut<'a> {
-    #[serde(rename = "stdout")]
-    Stdout {
-        #[tsify(type = "Uint8Array")]
-        #[serde(with = "serde_bytes")]
-        data: &'a [u8],
-        mode: StdoutMode,
-    },
     #[serde(rename = "debug")]
     Debug { info: DebugInfo },
-
-    #[serde(rename = "python_debug")]
-    PythonDebug {
-        #[serde(with = "serde_wasm_bindgen::preserve")]
-        state: js_sys::SharedArrayBuffer,
-    },
 
     /// Emit a build/engine artifact for the main thread to consume.
     #[serde(rename = "artifact")]
@@ -126,17 +105,10 @@ pub enum WorkerOut<'a> {
         name: String,
     },
 
-    /// Indicate that execution has paused.
-    ///
-    /// DWARF backends send `reason`; Python sends a `frame` snapshot it derives the
-    /// reason from. Each backend reads only its own field (see `DapDebugger::handle_paused`).
+    /// Indicate that execution has paused (for DWARF backends: the Python bridge instead
+    /// reports pauses through its devices, see `Debugger` in `src/ts/debugger.ts`).
     #[serde(rename = "paused")]
-    Paused {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<PauseReason>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        frame: Option<String>,
-    },
+    Paused { reason: PauseReason },
 }
 
 impl<'a> WorkerOut<'a> {

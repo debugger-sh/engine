@@ -1,6 +1,6 @@
 import type { Fs } from '../../pkg/engine';
 import type { Filesystem } from './fs';
-import type { Process } from './process';
+import type { Device, Pipe, Process } from './process';
 import { dirname, Internals, join } from './util';
 
 const LLVM = 'https://fabioibanez.github.io/website/llvm.core.wasm';
@@ -35,6 +35,22 @@ export interface BaseOptions {
   sysroot?: Toolchain | (string & {});
   /** Whether to allow debugging this process. Defaults to `false`. */
   debug?: boolean;
+  /**
+   * Devices to expose to the command, by path. Devices shadow the filesystem, but are not part
+   * of it: they are visible only to this command (for toolchains, only to the final step).
+   */
+  devices?: Record<string, Device>;
+  /**
+   * The pipe to use as stdin. By default, a new pipe.
+   *
+   * Pipes given to a process (as stdio or devices) are closed once it exits, unless created
+   * with `close: false`.
+   */
+  stdin?: Pipe;
+  /** The pipe to use as stdout. By default, a new pipe in flowing mode. */
+  stdout?: Pipe;
+  /** The pipe to use as stderr. By default, a new pipe in flowing mode. */
+  stderr?: Pipe;
 }
 
 export interface PythonOptions {
@@ -73,8 +89,8 @@ export interface ToolchainOptionsMap {
 /** A language toolchain: a mini build system run as one process. */
 export type Toolchain = keyof ToolchainOptionsMap;
 
-/** Options for a step of a toolchain. */
-export type StepOptions = Omit<BaseOptions, 'debug'> & {
+/** Options for a step of a toolchain, which always shares the stdio of its process. */
+export type StepOptions = Omit<BaseOptions, 'debug' | 'stdin' | 'stdout' | 'stderr'> & {
   /** Overrides `argv[0]`. */
   name?: string;
   /** Debug this step (`python` selects the Python debugger). */
@@ -115,7 +131,8 @@ async function python(ctx: Context<'python'>): Promise<number> {
     name: 'python',
     sysroot: options.sysroot ?? 'python',
     env: { PYTHONUNBUFFERED: '1', PYTHONDONTWRITEBYTECODE: '1', ...ctx.env },
-    debug: options.debug && args.length > 0 && 'python'
+    debug: options.debug && args.length > 0 && 'python',
+    devices: options.devices
   });
 }
 
@@ -181,7 +198,7 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
   ], { sysroot });
   if (linked) return linked;
 
-  return ctx.run(main, ctx.args, { debug: ctx.options.debug });
+  return ctx.run(main, ctx.args, { debug: ctx.options.debug, devices: ctx.options.devices });
 }
 
 /**
@@ -279,5 +296,5 @@ async function rust(ctx: Context<'rust'>): Promise<number> {
   ], { sysroot });
   if (linked) return linked;
 
-  return ctx.run(main, ctx.args, { debug: ctx.options.debug });
+  return ctx.run(main, ctx.args, { debug: ctx.options.debug, devices: ctx.options.devices });
 }
