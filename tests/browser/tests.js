@@ -165,7 +165,8 @@ test('debugger: breakpoints', async () => {
 
 const filter = new URLSearchParams(location.search).get('filter') ?? '';
 const failed = [];
-for (const { name, fn } of tests.filter((t) => t.name.includes(filter))) {
+const selected = tests.filter((t) => t.name.includes(filter));
+for (const { name, fn } of selected) {
   const start = performance.now();
   try {
     await fn();
@@ -175,5 +176,5 @@ for (const { name, fn } of tests.filter((t) => t.name.includes(filter))) {
     console.log(`(fail) ${name}: ${err?.stack ?? err}`);
   }
 }
-console.log(`${tests.length - failed.length} pass, ${failed.length} fail`);
+console.log(`${selected.length - failed.length} pass, ${failed.length} fail`);
 window.failed = failed;
