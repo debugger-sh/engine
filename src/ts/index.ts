@@ -36,6 +36,10 @@ type Failure = [code: number, message: string];
 
 const isFailure = (value: unknown): value is Failure => Array.isArray(value);
 
+/** Resolves a `sysroot` option (a toolchain name or a URL) to a URL. */
+const sysrootUrl = (sysroot: string) =>
+  Object.hasOwn(sysroots, sysroot) ? sysroots[sysroot] : sysroot;
+
 /** The engine's WebAssembly module and the memory shared by all of its threads. */
 let runtime: Promise<{ module: WebAssembly.Module; exports: InitOutput }> | undefined;
 
@@ -61,7 +65,8 @@ function cached<T>(
   if (!promise) {
     cache.set(url, (promise = load()));
     // Don't remember failures, so that they may be retried.
-    void promise.then((value) => isFailure(value) && cache.delete(url));
+    const forget = () => cache.delete(url);
+    promise.then((value) => isFailure(value) && forget(), forget);
   }
   return promise;
 }
@@ -93,13 +98,11 @@ export class Engine {
 
   private constructor({ module, exports }: { module: WebAssembly.Module; exports: InitOutput }) {
     this.fs = new Filesystem(new Fs());
-    const spawn = (gate: number) => {
+    this.pool = new Pool((gate) => {
       const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
       worker.postMessage({ type: 'init', module, memory: exports.memory, gate });
       return worker;
-    };
-    // A thread must not free its own memory, so we free it once it is terminated.
-    this.pool = new Pool(spawn, (tls, stack) => exports.__wbindgen_thread_destroy(tls, stack));
+    });
   }
 
   /** Kills any running processes and releases the memory held by the engine. */
@@ -178,8 +181,9 @@ export class Engine {
     if (/^https?:\/\//.test(command)) return this.job(process, { url: command }, args, options);
     if (command.startsWith('/') || command.startsWith('.'))
       return this.job(process, { path: command }, args, options);
-    if (command in toolchains) return this.toolchain(process, command as Toolchain, args, options);
-    if (command in commands) {
+    if (Object.hasOwn(toolchains, command))
+      return this.toolchain(process, command as Toolchain, args, options);
+    if (Object.hasOwn(commands, command)) {
       const [url, name] = commands[command];
       return this.job(process, { url }, args, { name, ...options });
     }
@@ -210,8 +214,8 @@ export class Engine {
         release();
         return exitCode;
       },
-      sysroot: async (url) => {
-        const sysroot = await this.sysroot(url);
+      sysroot: async (name) => {
+        const sysroot = await this.sysroot(sysrootUrl(name));
         return isFailure(sysroot) ? undefined : sysroot;
       }
     };
@@ -246,7 +250,7 @@ export class Engine {
 
     let sysroot: number | undefined;
     if (options.sysroot) {
-      const loaded = await this.sysroot(sysroots[options.sysroot] ?? options.sysroot);
+      const loaded = await this.sysroot(sysrootUrl(options.sysroot));
       if (isFailure(loaded)) return fail(loaded);
       sysroot = loaded.ptr();
     }

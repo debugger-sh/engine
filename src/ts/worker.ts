@@ -4,21 +4,12 @@
  */
 import init, { worker_init, worker_run, worker_sysroot } from '../../pkg/engine.js';
 
-type Exports = { __tls_base: WebAssembly.Global; __stack_alloc?: WebAssembly.Global };
-
 self.onmessage = async ({ data }: MessageEvent) => {
   try {
     if (data.type === 'init') {
-      const exports = (await init({
-        module_or_path: data.module,
-        memory: data.memory
-      })) as unknown as Exports;
+      await init({ module_or_path: data.module, memory: data.memory });
       worker_init(data.gate);
-      postMessage({
-        type: 'ready',
-        tls: exports.__tls_base.value,
-        stack: exports.__stack_alloc?.value
-      });
+      postMessage({ type: 'ready' });
     } else if (data.type === 'run') {
       postMessage({ type: 'exit', code: await worker_run(data.job) });
     } else if (data.type === 'sysroot') {

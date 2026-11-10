@@ -93,7 +93,7 @@ export interface Context<T extends Toolchain> {
   process: Process;
   /** Runs a step as a child process sharing this process' stdio, debugger, `cwd` and `env`. */
   run(command: string, args: string[], options?: StepOptions): Promise<number>;
-  /** Loads a sysroot, so that the toolchain can inspect it. */
+  /** Loads a sysroot (a toolchain name or URL), so that the toolchain can inspect it. */
   sysroot(url: string): Promise<Fs | undefined>;
 }
 
@@ -274,7 +274,7 @@ async function rust(ctx: Context<'rust'>): Promise<number> {
   ).flat();
 
   const lib = '/lib/rustlib/wasm32-wasip1/lib';
-  const fs = await ctx.sysroot(sysroots[sysroot] ?? sysroot);
+  const fs = await ctx.sysroot(sysroot);
   const rlibs = fs ? await locked(() => fs.glob(lib, ['*.rlib'], [])) : [];
   const libs = RUST_LIBS.map((name) => rlibs.find((rlib) => rlib.startsWith(`lib${name}-`)))
     .filter((rlib) => rlib !== undefined)

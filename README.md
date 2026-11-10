@@ -1,6 +1,6 @@
 # debugger-sh
 
-A browser-based execution engine powered by WebAssembly. Compile and run C/C++ and Python programs entirely in the browser with a built-in debugger.
+A browser-based execution engine powered by WebAssembly. Compile, run and debug C/C++, Rust and Python programs entirely in the browser.
 
 ## Installation
 
@@ -8,7 +8,7 @@ A browser-based execution engine powered by WebAssembly. Compile and run C/C++ a
 npm install debugger-sh
 ```
 
-> **Requires** these response headers (the engine uses `SharedArrayBuffer` for stdin):
+> **Requires** these response headers (the engine shares memory between threads):
 >
 > ```
 > Cross-Origin-Embedder-Policy: require-corp
@@ -22,67 +22,67 @@ npm install debugger-sh
 ```ts
 import { Engine } from 'debugger-sh';
 
-const engine = await Engine.create('c');
+const engine = await Engine.create();
 
-// Virtual filesystem — the program sees these as real files
-engine.fs = {
+// A shared, in-memory filesystem, visible to every process as it runs
+await engine.fs.mount({
   'main.cpp': `
     #include <iostream>
-    int main() {
-      std::cout << "Hello, world!" << std::endl;
-      return 0;
-    }
+    int main() { std::cout << "Hello, world!" << std::endl; }
   `
-};
+});
 
-// stdout / stderr chunks arrive as Uint8Array (UTF-8)
-const decoder = new TextDecoder();
-const print = (chunk: Uint8Array) => process.stdout.write(decoder.decode(chunk));
-engine.stdout.on('data', print);
-engine.stderr.on('data', print);
+// Compile, link and run. Processes start immediately and are awaitable.
+const proc = engine.run('cpp');
+proc.stdout.on('data', (chunk) => console.log(new TextDecoder().decode(chunk)));
+console.log(await proc); // { exitCode: 0, killed: false }
 
-await engine.run();
+engine.dispose();
 ```
-
-> Programs compile in **debug mode** by default, so a [DAP](https://microsoft.github.io/debug-adapter-protocol/) handshake is required before `run()` will proceed — see the [integration guide](./docs/integration.md#debugger-dap). To skip it, set `engine.debugger.enabled = false`.
 
 ---
 
-## Full API
+## API overview
 
 ```ts
-const engine = await Engine.create('c'); // 'c' | 'python'
+const engine = await Engine.create();
+engine.dispose(); // kills running processes and frees the engine
 
-engine.fs; // DirNode  — virtual filesystem, set before run()
-engine.stdout; // Stdout   — .on('data', (chunk: Uint8Array) => …) / .off(...)
-engine.stderr; // Stdout
-engine.stdin; // Stdin    — .write(string | Uint8Array): Promise<void>
-engine.debugger; // Debugger — DAP interface; set .enabled = false to skip the handshake
-engine.lang; // Lang
+// Filesystem (relative paths are relative to "/")
+await engine.fs.mount(tree | tarOrZipBytes | url, { at: '/' });
+await engine.fs.export({ format: 'tree' | 'tar' | 'zip', at, include, exclude });
+await engine.fs.readFile(path, 'utf8'); // or Uint8Array without an encoding
+await engine.fs.writeFile(path, contents);
+(await engine.fs.mkdir(path, { recursive }), remove(path, { recursive }), rename(from, to));
+(await engine.fs.stat(path), readDir(path));
 
-engine.run(); // Promise<RunResult> — { type: 'completed', exitCode } | { type: 'stopped' } | { type: 'error', error }
-engine.stop(); // void               — kills the worker; run() resolves with { type: 'stopped' }
+// Processes: toolchains (cpp, rust, python), built-ins (clang, clang++, lld, rustc),
+// or WASI executables (a URL, a path like /build/main or ./main, or bytes)
+const proc = engine.run('cpp', ['program', 'args'], {
+  cwd,
+  env,
+  sysroot,
+  debug,
+  ...toolchainOptions
+});
+proc.stdin.write('input');
+proc.stdin.close();
+proc.stdout.on('data', fn);
+proc.stderr.on('data', fn);
+proc.kill(); // resolves with { exitCode: 137, killed: true }
+await proc; // { exitCode, killed }
 
-engine.debugger.send(message); // DAP request, returns response synchronously
-engine.debugger.on('event', fn); // async DAP events
-engine.debugger.on('artifact', fn); // download artifacts emitted by the engine
-
-// Python only — hide bridge/bdb frames from stackTrace (set before run())
-engine.debugger.filterInternals = true;
+// Debugging (DAP): the process waits for the handshake
+const debuggable = engine.run('python', { debug: true, filterInternals: true });
+debuggable.debugger.send(request); // returns the response synchronously
+debuggable.debugger.on('event', fn);
 ```
 
-See [Presentation filtering (Python)](./docs/integration.md#presentation-filtering-python) in the integration guide for stack `presentationHint`, frame naming (`__main__` vs `main`), and dunder local filtering.
+The full interface is described in [docs/rewrite/interface.md](./docs/rewrite/interface.md), and the
+debugger integration in the [integration guide](./docs/integration.md#debugger-dap).
 
----
-
-## Wiring stdin
-
-`engine.stdin.write()` accepts a UTF-8 string or `Uint8Array`. Programs read via `cin`, `scanf`, `read()`, etc.
-
-```ts
-await engine.stdin.write('42\n');
-await engine.stdin.write(new TextEncoder().encode('42\n'));
-```
+> WASI preview 1 programs (built with `wasi-libc`, like the bundled toolchains) always start in
+> `/`, whatever their `cwd`, so toolchains pass them absolute paths.
 
 ---
 
@@ -94,13 +94,16 @@ For a full reference integration, see the [debugger.sh IDE](https://github.com/d
 
 ## Contributing / building from source
 
-> Requires [Cargo 1.91+](https://crates.io/), [wasm-pack](https://rustwasm.github.io/wasm-pack/), and Node v22+.
+> Requires [rustup](https://rustup.rs/) (the nightly toolchain pinned in `rust-toolchain.toml` is needed to
+> build shared-memory WebAssembly), [wasm-pack](https://rustwasm.github.io/wasm-pack/), and Node v22+.
 
 ```bash
 cargo install wasm-pack
 npm install
-npm run build   # wasm-pack build --target web && vite build
-npm run dev     # local development
+npm run build          # wasm-pack build --target web && vite build
+npm run dev            # local development
+npm test               # tests/bun (headless, in Bun) and tests/browser (Chromium, via Playwright)
+npm run tools:dap      # DAP integration tests
 ```
 
 To test against the reference IDE, clone [debugger-sh/debugger.sh](https://github.com/debugger-sh/debugger.sh) alongside this repo and link:

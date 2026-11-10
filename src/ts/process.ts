@@ -153,18 +153,15 @@ export type WorkerMessage = { type: string; [key: string]: unknown };
 /** A worker executing jobs on the engine's shared memory. */
 export class PoolWorker {
   public readonly ready: Promise<void>;
-  private thread?: { tls: number; stack: number };
 
   constructor(
     public readonly worker: Worker,
-    public readonly gate: number,
-    private readonly destroy: (tls: number, stack: number) => void
+    public readonly gate: number
   ) {
     this.ready = new Promise((resolve, reject) => {
       const onReady = (e: MessageEvent<WorkerMessage>) => {
         worker.removeEventListener('message', onReady);
         if (e.data.type !== 'ready') return reject(new Error(String(e.data.message)));
-        this.thread = e.data as unknown as { tls: number; stack: number };
         resolve();
       };
       worker.addEventListener('message', onReady);
@@ -174,12 +171,16 @@ export class PoolWorker {
     });
   }
 
-  /** Safely terminates this worker (see `src/worker/gate.rs`). */
+  /**
+   * Safely terminates this worker (see `src/worker/gate.rs`).
+   *
+   * Termination is asynchronous and unobservable, so the worker's stack and TLS block
+   * can never be safely freed (as in `wasmer-sdk`): a killed worker leaks them.
+   */
   async terminate() {
     gate_doom(this.gate);
     while (!gate_idle(this.gate)) await tick();
     this.worker.terminate();
-    if (this.thread) this.destroy(this.thread.tls, this.thread.stack);
   }
 }
 
@@ -191,16 +192,13 @@ export class Pool {
   private readonly idle: PoolWorker[] = [];
   private readonly all = new Set<PoolWorker>();
 
-  constructor(
-    private readonly spawn: (gate: number) => Worker,
-    private readonly destroy: (tls: number, stack: number) => void
-  ) {}
+  constructor(private readonly spawn: (gate: number) => Worker) {}
 
   async acquire(): Promise<PoolWorker> {
     const reused = this.idle.pop();
     if (reused) return reused;
     const gate = gate_new();
-    const worker = new PoolWorker(this.spawn(gate), gate, this.destroy);
+    const worker = new PoolWorker(this.spawn(gate), gate);
     this.all.add(worker);
     try {
       await worker.ready;

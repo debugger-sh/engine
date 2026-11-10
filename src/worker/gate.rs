@@ -9,6 +9,9 @@
 //! [dooms](Gate::doom) it, waits until it is [idle](Gate::is_idle) and only then
 //! terminates it. A doomed worker parks forever (holding nothing) the next time it
 //! tries to enter a critical section. This approach is borrowed from `wasmer-sdk`.
+//!
+//! Parking blocks rather than spins, since some runtimes (Bun) cannot terminate a
+//! worker which is busy running WebAssembly.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
@@ -66,8 +69,10 @@ impl Critical {
             // increment, or this thread observes the doom.
             if gate.depth.fetch_add(1, SeqCst) == 0 && gate.doomed.load(SeqCst) != 0 {
                 gate.depth.fetch_sub(1, SeqCst);
+                // Park (without spinning) until terminated: `doomed` is never reset.
+                let doomed = gate.doomed.as_ptr() as *mut i32;
                 loop {
-                    std::hint::spin_loop();
+                    unsafe { core::arch::wasm32::memory_atomic_wait32(doomed, 1, -1) };
                 }
             }
         }

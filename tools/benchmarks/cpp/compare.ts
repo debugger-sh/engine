@@ -1,6 +1,6 @@
 // Compares the engine's isolated program-execution time against the native aarch64
 // baseline. Native side reuses utils/run-benchmark.sh (the source of truth); engine
-// side runs the same program N times and collects `timing.runMs`.
+// side builds the program once, then times N runs of the executable.
 //
 // Usage:  npx -y bun compare.ts <program.(cpp|c)>
 // Env:    BENCH_ITERS=5  BENCH_OPT=O0   (engine compiles user code at -O0; match it)
@@ -34,19 +34,20 @@ if (!m) {
 }
 const native = { min: Number(m[1]), avg: Number(m[2]) };
 
-// --- engine: run N clean executions, collect the isolated runMs ---
-const engine = await Engine.create('c');
-engine.debugger.enabled = true; // debug instrumentation would inflate runMs
-engine.fs = { [basename(src)]: source };
+// --- engine: build once, then time N executions (including worker dispatch) ---
+const engine = await Engine.create();
+await engine.fs.mount({ [basename(src)]: source });
+await engine.run('cpp');
 
 const runMs: number[] = [];
 for (let i = 0; i < iters; i++) {
-  const r = await engine.run();
-  if (r.type !== 'completed' || r.exitCode !== 0) {
+  const start = performance.now();
+  const r = await engine.run('/build/main');
+  if (r.exitCode !== 0) {
     console.error('engine run failed:', JSON.stringify(r));
     process.exit(1);
   }
-  runMs.push(r.timing.runMs);
+  runMs.push(performance.now() - start);
 }
 const engineStats = stats(runMs);
 
@@ -55,7 +56,7 @@ const f = (n: number) => n.toFixed(3).padStart(9);
 console.log(`\n== ${basename(src)}  (-${opt}, ${iters} iters) ==`);
 console.log(`  native  min ${f(native.min)} ms   avg ${f(native.avg)} ms`);
 console.log(
-  `  engine  min ${f(engineStats.min)} ms   avg ${f(engineStats.avg)} ms   (runMs, isolated execution)`
+  `  engine  min ${f(engineStats.min)} ms   avg ${f(engineStats.avg)} ms   (execution of /build/main)`
 );
 console.log(
   `  ratio engine/native:  min ${(engineStats.min / native.min).toFixed(2)}x   avg ${(engineStats.avg / native.avg).toFixed(2)}x\n`

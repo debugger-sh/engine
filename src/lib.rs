@@ -1,4 +1,4 @@
-#![feature(thread_local)]
+#![feature(thread_local, stdarch_wasm_atomic_wait)]
 
 pub mod dap;
 pub mod debug;

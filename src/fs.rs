@@ -378,7 +378,7 @@ impl Fs {
         let fs = self.fs();
         create_dir_all(fs, at).map_err(|e| fs_error(e, at))?;
         let write = |path: &Path, is_dir: bool, contents: &[u8], mtime: Option<u64>| {
-            let path = at.join(normalize(path));
+            let path = normalize(at.join(path));
             let dir = if is_dir { Some(path.as_path()) } else { path.parent() };
             if let Some(dir) = dir {
                 create_dir_all(fs, dir).map_err(|e| fs_error(e, dir))?;

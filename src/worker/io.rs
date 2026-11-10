@@ -71,6 +71,10 @@ impl AsyncRead for Stdin {
         _cx: &mut Context<'_>,
         buf: &mut wasmer_wasix::virtual_fs::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
+        // Unbuffered readers follow each 1-byte read with a 0-byte one, which mustn't block.
+        if buf.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
         let (read_idx, write_idx) = loop {
             // Load the sequence number first so that no write (or close) is missed.
             let seq = self.load(SEQ_IDX);
