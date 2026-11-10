@@ -1,23 +1,43 @@
-import { Engine, type FileTree, type Process } from 'debugger-sh';
-import { onTestFinished } from 'vitest';
+import { Engine, type FileTree, type Process, type ProcessResult } from 'debugger-sh';
+import { expect, onTestFinished } from 'vitest';
+
+type Output = ProcessResult & { stdout: string; stderr: string };
+
+declare module 'vitest' {
+  interface Matchers<R, T> {
+    /** Awaits a process, matching (a subset of) its result and output. */
+    outputs: T extends Process ? (expected: Partial<Output>) => Promise<R> : never;
+  }
+}
 
 /** Creates an engine with the given files, disposed when the test finishes. */
-export async function createEngine(files: FileTree = {}): Promise<Engine> {
+export async function eng(files: FileTree = {}): Promise<Engine> {
   const engine = await Engine.create();
   onTestFinished(() => engine.dispose());
   await engine.fs.mount(files);
   return engine;
 }
 
-/** Awaits a process, collecting its output. */
-export async function output(proc: Process) {
-  const decoder = new TextDecoder();
-  let stdout = '';
-  let stderr = '';
-  proc.stdout.on('data', (chunk) => (stdout += decoder.decode(chunk)));
-  proc.stderr.on('data', (chunk) => (stderr += decoder.decode(chunk)));
-  return { ...(await proc), stdout, stderr };
-}
+expect.extend({
+  async outputs(proc, expected: Partial<Output>) {
+    if (typeof proc?.stdout?.on !== 'function') {
+      throw new TypeError(`outputs expects a Process, received ${this.utils.printReceived(proc)}`);
+    }
+    const decoder = new TextDecoder();
+    let stdout = '';
+    let stderr = '';
+    proc.stdout.on('data', (chunk: Uint8Array) => (stdout += decoder.decode(chunk)));
+    proc.stderr.on('data', (chunk: Uint8Array) => (stderr += decoder.decode(chunk)));
+    const actual: Output = { ...(await proc), stdout, stderr };
+    const { iterableEquality, subsetEquality } = this.utils;
+    return {
+      pass: this.equals(actual, expected, [iterableEquality, subsetEquality]),
+      message: () => `expected process ${this.isNot ? 'not ' : ''}to output`,
+      actual,
+      expected
+    };
+  }
+});
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -47,10 +67,9 @@ int main(int argc, char** argv) {
 
 /** Creates an engine with a multi-purpose test program (see {@link TOOL}) at `/bin/main`. */
 export async function withTool(): Promise<Engine> {
-  const tool = await createEngine({ src: { files: { 'tool.cpp': TOOL } } });
-  const { exitCode, stderr } = await output(
-    tool.run('cpp', { sources: ['src/*.cpp'], buildDir: '/bin' })
-  );
-  if (exitCode !== 0) throw new Error(stderr);
+  const tool = await eng({ src: { files: { 'tool.cpp': TOOL } } });
+  await expect(tool.run('cpp', { sources: ['src/*.cpp'], buildDir: '/bin' })).outputs({
+    exitCode: 0
+  });
   return tool;
 }

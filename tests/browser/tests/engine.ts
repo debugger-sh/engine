@@ -1,7 +1,7 @@
 import { Engine } from 'debugger-sh';
 import { expect, test } from 'vitest';
 
-import { createEngine, sleep, withTool } from '../helpers';
+import { eng, sleep, withTool } from '../helpers';
 
 test('create returns an engine with an empty filesystem', async () => {
   const engine = await Engine.create();
@@ -25,7 +25,7 @@ test('using a disposed engine throws', async () => {
 });
 
 test('engines have independent filesystems', async () => {
-  const [a, b] = await Promise.all([createEngine(), createEngine()]);
+  const [a, b] = await Promise.all([eng(), eng()]);
   await a.fs.writeFile('/a.txt', 'a');
   expect(await b.fs.readDir('/')).toEqual([]);
 });

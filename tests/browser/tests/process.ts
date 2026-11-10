@@ -1,19 +1,19 @@
 import { expect, test } from 'vitest';
 
-import { createEngine, output, sleep, withTool } from '../helpers';
+import { eng, sleep, withTool } from '../helpers';
 
 test('forwards arguments', async () => {
   const tool = await withTool();
-  expect((await output(tool.run('/bin/main', ['args', 'a', 'b c']))).stdout).toBe('a\nb c\n');
+  await expect(tool.run('/bin/main', ['args', 'a', 'b c'])).outputs({ stdout: 'a\nb c\n' });
 });
 
 test('invalid binaries and directories exit with 126', async () => {
-  const engine = await createEngine({ 'text.wasm': 'not wasm', dir: { files: {} } });
-  expect(await output(engine.run('/text.wasm'))).toMatchObject({
+  const engine = await eng({ 'text.wasm': 'not wasm', dir: { files: {} } });
+  await expect(engine.run('/text.wasm')).outputs({
     exitCode: 126,
     stderr: '/text.wasm: cannot execute\n'
   });
-  expect(await output(engine.run('/dir'))).toMatchObject({
+  await expect(engine.run('/dir')).outputs({
     exitCode: 126,
     stderr: '/dir: cannot execute\n'
   });
@@ -21,16 +21,16 @@ test('invalid binaries and directories exit with 126', async () => {
 });
 
 test('unknown commands exit with 127', async () => {
-  const engine = await createEngine();
-  expect(await output(engine.run('nope'))).toMatchObject({
+  const engine = await eng();
+  await expect(engine.run('nope')).outputs({
     exitCode: 127,
     stderr: 'nope: command not found\n'
   });
-  expect(await output(engine.run('/missing'))).toMatchObject({
+  await expect(engine.run('/missing')).outputs({
     exitCode: 127,
     stderr: '/missing: command not found\n'
   });
-  expect(await output(engine.run('constructor'))).toMatchObject({ exitCode: 127 });
+  await expect(engine.run('constructor')).outputs({ exitCode: 127 });
 });
 
 test('processes run concurrently', async () => {
@@ -43,7 +43,7 @@ test('processes run concurrently', async () => {
 test('forwards environment variables', async () => {
   const tool = await withTool();
   const proc = tool.run('/bin/main', ['env', 'NAME'], { env: { NAME: 'value' } });
-  expect((await output(proc)).stdout).toBe('value\n');
+  await expect(proc).outputs({ stdout: 'value\n' });
 });
 
 test('the filesystem stays usable while processes run', async () => {
@@ -56,9 +56,10 @@ test('the filesystem stays usable while processes run', async () => {
 
 test('guest errors exit with 134', async () => {
   const tool = await withTool();
-  const result = await output(tool.run('/bin/main', ['trap']));
-  expect(result.exitCode).toBe(134);
-  expect(result.stderr).toMatch(/^\/bin\/main: /);
+  await expect(tool.run('/bin/main', ['trap'])).outputs({
+    exitCode: 134,
+    stderr: expect.stringMatching(/^\/bin\/main: /)
+  });
 });
 
 test('files written by processes are visible to the main thread', async () => {
@@ -70,7 +71,7 @@ test('files written by processes are visible to the main thread', async () => {
 test('files written by the main thread are visible to processes', async () => {
   const tool = await withTool();
   await tool.fs.writeFile('/hello.txt', 'from host');
-  expect((await output(tool.run('/bin/main', ['read', '/hello.txt']))).stdout).toBe('from host');
+  await expect(tool.run('/bin/main', ['read', '/hello.txt'])).outputs({ stdout: 'from host' });
 });
 
 test('kill after exit has no effect', async () => {
@@ -113,10 +114,12 @@ test('kill resolves immediately with 137', async () => {
 });
 
 test('network errors exit with 127', async () => {
-  const engine = await createEngine();
+  const engine = await eng();
   const missing = `${location.origin}/missing.wasm`;
-  const result = await output(engine.run(missing));
-  expect(result).toMatchObject({ exitCode: 127, stderr: `${missing}: network error (404)\n` });
+  await expect(engine.run(missing)).outputs({
+    exitCode: 127,
+    stderr: `${missing}: network error (404)\n`
+  });
 });
 
 test('the debugger is undefined without debug: true', async () => {
@@ -152,21 +155,23 @@ test('runs an executable from a relative path, resolved against the root', async
 });
 
 test('runs an executable from a URL', async () => {
-  const engine = await createEngine();
+  const engine = await eng();
   const python = 'https://runno.dev/langs/python-3.11.3.wasm';
-  const result = await output(engine.run(python, ['-c', 'print(6 * 7)'], { sysroot: 'python' }));
-  expect(result).toMatchObject({ exitCode: 0, stdout: '42\n' });
+  await expect(engine.run(python, ['-c', 'print(6 * 7)'], { sysroot: 'python' })).outputs({
+    exitCode: 0,
+    stdout: '42\n'
+  });
 });
 
 test('processes see each other’s files', async () => {
   const tool = await withTool();
   await tool.run('/bin/main', ['write', '/shared.txt', 'shared']);
-  expect((await output(tool.run('/bin/main', ['read', '/shared.txt']))).stdout).toBe('shared');
+  await expect(tool.run('/bin/main', ['read', '/shared.txt'])).outputs({ stdout: 'shared' });
 });
 
 test('captures stderr', async () => {
   const tool = await withTool();
-  expect(await output(tool.run('/bin/main', ['stderr']))).toMatchObject({
+  await expect(tool.run('/bin/main', ['stderr'])).outputs({
     stdout: '',
     stderr: 'oops\n'
   });
@@ -175,29 +180,29 @@ test('captures stderr', async () => {
 test('stdin larger than its buffer', async () => {
   const tool = await withTool();
   const proc = tool.run('/bin/main', ['cat']);
-  const result = output(proc);
   const big = 'x'.repeat(100_000);
+  const result = expect(proc).outputs({ stdout: big });
   await proc.stdin.write(big);
   proc.stdin.close();
-  expect((await result).stdout).toBe(big);
+  await result;
 });
 
 test('stdin is forwarded until closed', async () => {
   const tool = await withTool();
   const proc = tool.run('/bin/main', ['cat']);
-  const result = output(proc);
+  const result = expect(proc).outputs({ stdout: 'CS198! bytes' });
   expect(proc.stdin.closed).toBe(false);
   await proc.stdin.write('CS198!');
   await proc.stdin.write(new TextEncoder().encode(' bytes'));
   proc.stdin.close();
   expect(proc.stdin.closed).toBe(true);
-  expect((await result).stdout).toBe('CS198! bytes');
+  await result;
 });
 
 test('sysroot network errors exit with 127', async () => {
   const tool = await withTool();
-  const result = await output(
-    tool.run('/bin/main', { sysroot: `${location.origin}/missing.tar.gz` })
-  );
-  expect(result).toMatchObject({ exitCode: 127, stderr: '/bin/main: network error (404)\n' });
+  await expect(tool.run('/bin/main', { sysroot: `${location.origin}/missing.tar.gz` })).outputs({
+    exitCode: 127,
+    stderr: '/bin/main: network error (404)\n'
+  });
 });
