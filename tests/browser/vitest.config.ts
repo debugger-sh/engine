@@ -20,7 +20,7 @@ export default defineConfig({
   optimizeDeps: { exclude: ['debugger-sh'] },
   server: { headers, fs: { allow: ['../..'] } },
   test: {
-    include: ['**/*.test.ts'],
+    include: ['tests/**/*.ts'],
     testTimeout: 120_000,
     fileParallelism: false,
     browser: {
