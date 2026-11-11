@@ -16,7 +16,6 @@ use crate::types::DebugInfo;
 
 struct AdapterState {
     session: DapSession,
-    filter_internals: bool,
 }
 
 #[wasm_bindgen]
@@ -31,7 +30,6 @@ impl DapAdapter {
         Self {
             state: Rc::new(RefCell::new(AdapterState {
                 session: DapSession::new(),
-                filter_internals: false,
             })),
         }
     }
@@ -64,11 +62,10 @@ impl DapAdapter {
                     .expect("python_debug message has send field")
                     .dyn_into::<js_sys::Function>()
                     .expect("send is a function");
-                let filter_internals = state.borrow().filter_internals;
-                state.borrow_mut().session.set_debugger(Box::new(PythonBackend::new(
-                    PyDebugger::new(send),
-                    filter_internals,
-                )));
+                state
+                    .borrow_mut()
+                    .session
+                    .set_debugger(Box::new(PythonBackend::new(PyDebugger::new(send))));
                 state.borrow_mut().session.try_emit_initialized();
             }
             "paused" => {
@@ -114,11 +111,6 @@ impl DapAdapter {
 
         let ser = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
         response.serialize(&ser).unwrap_or(JsValue::NULL)
-    }
-
-    #[wasm_bindgen(js_name = "setFilterInternals")]
-    pub fn set_filter_internals(&self, value: bool) {
-        self.state.borrow_mut().filter_internals = value;
     }
 
     pub fn on(&self, callback: js_sys::Function) {

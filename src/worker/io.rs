@@ -75,8 +75,8 @@ const SEQ_IDX: u32 = 2;
 const CLOSED_IDX: u32 = 3;
 
 /// A byte stream over a ring buffer shared with the main thread (see `Pipe` in
-/// `src/ts/process.ts`). Readers wait on the sequence number, which is bumped by every
-/// write and on close; writers wait on the read index while the buffer is full.
+/// `src/ts/process.ts`). Every read, write and close bumps the sequence number, which
+/// blocked readers and writers wait on.
 #[derive(Debug)]
 pub struct PipeDevice {
     header: js_sys::Int32Array,
@@ -111,6 +111,12 @@ impl PipeDevice {
         // One slot is always kept empty to distinguish full from empty.
         (self.load(READ_IDX) + len - self.load(WRITE_IDX) - 1) % len
     }
+
+    /// Bumps the sequence number, waking every blocked reader and writer.
+    fn notify(&self) {
+        js_sys::Atomics::add(&self.header, SEQ_IDX, 1).expect("bumped pipe sequence");
+        js_sys::Atomics::notify(&self.header, SEQ_IDX).expect("notified pipe");
+    }
 }
 
 impl Read for PipeDevice {
@@ -141,7 +147,7 @@ impl Read for PipeDevice {
         let count = (end - read).min(buf.len() as u32);
         self.data.subarray(read, read + count).copy_to(&mut buf[..count as usize]);
         self.store(READ_IDX, (read + count) % len);
-        js_sys::Atomics::notify(&self.header, READ_IDX).expect("notified pipe writers");
+        self.notify();
         Ok(count as usize)
     }
 }
@@ -155,12 +161,13 @@ impl Write for PipeDevice {
             return Ok(0);
         }
         let free = loop {
+            // Load the sequence number first so that no read (or close) is missed.
+            let seq = self.load(SEQ_IDX);
             if self.load(CLOSED_IDX) != 0 {
                 return Err(io::ErrorKind::BrokenPipe.into());
             }
-            let read = self.load(READ_IDX);
             match self.free() {
-                0 => weak_error!(js_sys::Atomics::wait(&self.header, READ_IDX, read as i32)),
+                0 => weak_error!(js_sys::Atomics::wait(&self.header, SEQ_IDX, seq as i32)),
                 free => break free,
             };
         };
@@ -170,8 +177,7 @@ impl Write for PipeDevice {
         let count = free.min(len - write).min(buf.len() as u32);
         self.data.subarray(write, write + count).copy_from(&buf[..count as usize]);
         self.store(WRITE_IDX, (write + count) % len);
-        js_sys::Atomics::add(&self.header, SEQ_IDX, 1).expect("bumped pipe sequence");
-        js_sys::Atomics::notify(&self.header, SEQ_IDX).expect("notified pipe readers");
+        self.notify();
         Ok(count as usize)
     }
 

@@ -4,9 +4,9 @@ import { Debugger } from './debugger';
 import { Filesystem } from './fs';
 import { Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
 import {
-  type BaseOptions,
   commands,
   type Context,
+  type RunOptions,
   type StepOptions,
   sysroots,
   type Toolchain,
@@ -21,13 +21,17 @@ import { internal, Internals, join } from './util';
  */
 export type CommandLike = Uint8Array | string | Toolchain;
 
-/** Toolchains may allow supplying toolchain-specific options. */
 export type CommandOptions<C extends CommandLike> = C extends Toolchain
-  ? BaseOptions & ToolchainOptionsMap[C]
-  : BaseOptions;
+  ? RunOptions & ToolchainOptionsMap[C]
+  : RunOptions;
 
-/** A process spawned with `debug: true`. */
+/**
+ * A process spawned with debugging enabled.
+ */
 export interface DebuggableProcess extends Process {
+  /**
+   * The debugging interface for this process.
+   */
   readonly debugger: Debugger;
 }
 
@@ -72,11 +76,12 @@ function cached<T>(
 }
 
 /**
- * An engine represents a workspace (a shared filesystem) on which any number of
- * concurrent processes operate.
+ * An engine is a shared workspace for running programs.
+ * It can be created with {@link Engine.create} and should be cleaned up
+ * using {@link Engine.dispose} when you are done with it.
  */
 export class Engine {
-  /** The shared, in-memory filesystem of this engine. */
+  /** The in-memory filesystem shared by all processes */
   public readonly fs: Filesystem;
 
   readonly #pool: Pool;
@@ -118,14 +123,21 @@ export class Engine {
   }
 
   /**
-   * Runs a command, returning the (already running) process.
+   * Runs a command.
    *
-   * `command` is interpreted as, in order:
-   *  1. A WASI executable to download, if it is a URL (`http://` or `https://`).
-   *  2. A WASI executable in the filesystem, if it is an absolute or `.`-prefixed path.
-   *  3. A toolchain (`cpp`, `rust`, `python`) or built-in command (`clang`, `clang++`, `lld`, `rustc`).
+   * ```ts
+   * // Run a WASI program
+   * await engine.run("https://example.com/test.wasm");
    *
-   * With `debug: true`, the process waits for the DAP handshake on `proc.debugger`.
+   * // Run a WASI executable
+   * const bytes: Uint8Array = // ... //;
+   * await engine.run(bytes);
+   *
+   * // Run a built-in language toolchain or command.
+   * await engine.run("cpp");
+   * ```
+   *
+   * Setting {@link RunOptions.debug} to `true` allows debugging the process using {@link Process.debugger}.
    */
   public run<C extends CommandLike>(
     command: C,
@@ -142,11 +154,7 @@ export class Engine {
     args: string[],
     options?: CommandOptions<C>
   ): Process;
-  public run(
-    command: CommandLike,
-    args?: string[] | (BaseOptions & PythonFilter),
-    options?: BaseOptions & PythonFilter
-  ): Process {
+  public run(command: CommandLike, args?: string[] | RunOptions, options?: RunOptions): Process {
     if (this.#disposed) throw new Error('The engine has been disposed');
     if (!Array.isArray(args)) [args, options] = [[], args];
     options ??= {};
@@ -165,7 +173,7 @@ export class Engine {
     const pipes = [...Object.values(stdio), ...Object.values(options.devices ?? {})].filter(
       (device): device is Pipe => device instanceof Pipe && device[Internals].close
     );
-    const debug = options.debug ? new Debugger(Internals, options.filterInternals) : undefined;
+    const debug = options.debug ? new Debugger(Internals) : undefined;
     const process = this.#spawn(stdio, debug, command, args, options, pipes);
 
     this.#processes.add(process);
@@ -350,8 +358,6 @@ export class Engine {
   }
 }
 
-type PythonFilter = { filterInternals?: boolean };
-
 export type { Artifact, Debugger } from './debugger';
 export type {
   Directory,
@@ -368,7 +374,7 @@ export type { Device, PipeOptions, ProcessResult, Readable, Writable } from './p
 export type { Process } from './process';
 export { Pipe } from './process';
 export type {
-  BaseOptions,
+  RunOptions,
   CppOptions,
   PythonOptions,
   RustOptions,

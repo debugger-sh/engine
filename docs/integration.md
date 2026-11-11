@@ -247,27 +247,9 @@ After each successful stop, the worker resets mode to **normal** and updates **`
 
 When building a student-facing IDE, you usually want to hide debugger/runtime noise from `stackTrace` and `scopes` responses. The engine applies **Python-only** filters; C/C++ stacks come from DWARF and are not filtered the same way.
 
-#### Stack frames — `debugger.filterInternals`
+#### Stack frames
 
-Pass it to **`run()`**:
-
-```ts
-engine.run('python', { debug: true, filterInternals: true }); // recommended for student UIs
-```
-
-| `filterInternals` | `stackTrace` behaviour                                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `false` (default) | All frames are returned. Internal frames use `presentationHint: "subtle"`; user code uses `"normal"`. Clients can hide or dim subtle frames themselves. |
-| `true`            | Frames where `user` is `false` are omitted from the response.                                                                                           |
-
-A frame is **`user: true`** when its source path is `/main.py` (the student's virtual file). Everything else — the Bdb bridge (`/_bridge.py`), stdlib, etc. — is internal.
-
-Internal frames always carry `presentationHint: "subtle"` even when `filterInternals` is `false`, so you can implement a “show internals” toggle without re-querying the worker:
-
-```ts
-const frames = res.body?.stackFrames ?? [];
-const studentFrames = frames.filter((f) => f.presentationHint !== 'subtle');
-```
+Frames belonging to the debugger itself (`bdb` and the bridge) are always omitted from `stackTrace`. Every frame of the running program is kept, including imported modules and the stdlib.
 
 #### Frame names
 
@@ -299,7 +281,7 @@ EXPAND responses must fit in the debug **SAB** (4084 bytes). The bridge returns 
 
 #### C / C++
 
-No `filterInternals` equivalent. `stackTrace` reflects the DWARF backtrace for instrumented user code. Variable formatting follows DWARF type info (see `tools/dap/tests/formatting/`).
+`stackTrace` reflects the DWARF backtrace for instrumented user code. Variable formatting follows DWARF type info (see `tools/dap/tests/formatting/`).
 
 ### Program End
 

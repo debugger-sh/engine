@@ -1,6 +1,10 @@
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only referenced by {@link} in doc comments
+import type { Engine } from '.';
 import type { Fs } from '../../pkg/engine';
 import type { Filesystem } from './fs';
 import type { Device, Pipe, Process } from './process';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only referenced by {@link} in doc comments
+import type { PipeOptions, Readable } from './process';
 import { dirname, Internals, join } from './util';
 
 const LLVM = 'https://fabioibanez.github.io/website/llvm.core.wasm';
@@ -22,61 +26,190 @@ export const commands: Record<string, [url: string, name: string]> = {
   rustc: [RUSTC, 'rustc']
 };
 
-export interface BaseOptions {
-  /** Environment variables to supply to the command. For toolchains, this is shared by all steps. */
-  env?: Record<string, string>;
+export interface RunOptions {
   /**
-   * The sysroot to use while running this command: a toolchain (like "cpp" or "python") to use
-   * its default sysroot, or a URL to a tarball (.tar.gz) or zip archive.
+   * Environment variables to supply to the command.
    *
-   * Sysroots are invisibly unioned beneath the filesystem, and are only visible to this command.
-   * By default, when running a toolchain, the toolchain sysroot is used.
+   * For language toolchains, this environment is shared by all steps.
+   */
+  env?: Record<string, string>;
+
+  /**
+   * A sysroot is a filesystem that is accessible by this command,
+   * but is not visible to other processes created by the engine or {@link Engine.fs}.
+   * This is typically used for loading standard library files, e.g. the C++ standard libraries.
+   *
+   * Language toolchains (e.g. `cpp`, `rust` and `python`) will automatically use
+   * the correct sysroot needed to run that toolchain. Note that individual toolchain
+   * steps (e.g. `clang` or `lld`) will **not**, as this allows customizing the toolchain
+   * for maximum flexibility.
+   *
+   * You can configure the toolchain that is used by passing the following:
+   *
+   *  * A language toolchain name, e.g. `"cpp"`, to use the default sysroot for that toolchain.
+   *  * The URL to a toolchain archive to download and use. Tarballs (.tar.gz) and zip archives
+   *    are currently supported.
    */
   sysroot?: Toolchain | (string & {});
-  /** Whether to allow debugging this process. Defaults to `false`. */
-  debug?: boolean;
+
   /**
-   * Devices to expose to the command, by path. Devices shadow the filesystem, but are not part
-   * of it: they are visible only to this command (for toolchains, only to the final step).
+   * Whether to enable debugging on this process.
+   *
+   * The debugging interface will be accessible through {@link Process.debugger}.
+   * Currently, WASI executables with debug info (e.g. those compiled via the `rust`
+   * and `cpp` toolchains) as well Python programs support debugging.
+   */
+  debug?: boolean;
+
+  /**
+   * Devices can be used to allow communication with a process beyond what is
+   * already supported by standard in/out/err.
+   *
+   * Since processes do not execute on the main browser thread, we cannot pass Wasm
+   * imports directly to the running program. Devices are intended to be a more flexible,
+   * language-agnostic interface for use-cases that require external communication: graphics,
+   * mouse/keyboard, test harnesses, audio, and more!
+   *
+   * A device is given a path that is accessible to the guest program through the filesystem.
+   * Currently, stream-based ({@link Pipe}) and shared-memory ({@link SharedArrayBuffer})
+   * devices are supported.
+   *
+   * Devices occupy paths in the filesystem, and can be created in nested directories
+   * even when the parent directories do not exist. If a file shares the same name
+   * as a device, the device takes precedence for filesystem operations.
+   *
+   * ### Stream-based Devices
+   *
+   * A {@link Pipe} is a file the program reads or writes to as a stream.
+   * Pipes store data in an internal buffer, and will apply backpressure for
+   * readers (when the buffer is empty) and writers (when the buffer is full).
+   *
+   * Note: {@link Pipe} objects passed here will automatically close when this
+   * process exits for any reason, unless {@link PipeOptions.close} is set to `false`.
+   *
+   * ```ts
+   * const pipe = new Pipe();
+   * const proc = engine.run("python", ["-c", "open('/dev/out', 'w').write('hello')"], {
+   *   devices: { "/dev/out": pipe }
+   * });
+   *
+   * for await (const line of pipe.lines()) {
+   *   console.log(line);
+   * }
+   * ```
+   *
+   * This could be used to implement message passing and interactive programs.
+   *
+   * ### Shared-memory Devices
+   *
+   * A {@link SharedArrayBuffer} is a fixed-size file backed by shared memory.
+   *
+   * ```ts
+   * const memory = new SharedArrayBuffer(4);
+   * await engine.run("python", ["-c", "open('/dev/mem', 'wb').write(b'ping')"], {
+   *   devices: { "/dev/mem": memory }
+   * });
+   * console.log(new TextDecoder().decode(new Uint8Array(memory))); // "ping"
+   * ```
+   *
+   * This could be used to implement a simple graphics framebuffer.
    */
   devices?: Record<string, Device>;
+
   /**
-   * The pipe to use as stdin. By default, a new pipe.
+   * Used to customize a process's `stdin`.
+   * If not provided, a new pipe is created for this process.
    *
-   * Pipes given to a process (as stdio or devices) are closed once it exits, unless created
-   * with `close: false`.
+   * Note that any pipes provided (including the default one)
+   * will automatically close when the process exits unless
+   * {@link PipeOptions.close} is set to `false`.
    */
   stdin?: Pipe;
-  /** The pipe to use as stdout. By default, a new pipe in flowing mode. */
+
+  /**
+   * Used to customize a process's `stdout`.
+   * If not provided, a new pipe is created for this process.
+   *
+   * The default pipe will be created in flowing mode, meaning
+   * that any output is automatically read and passed to listeners
+   * rather than waiting for {@link Readable.read} to be called.
+   *
+   * Note that any pipes provided (including the default one)
+   * will automatically close when the process exits unless
+   * {@link PipeOptions.close} is set to `false`.
+   */
   stdout?: Pipe;
-  /** The pipe to use as stderr. By default, a new pipe in flowing mode. */
+
+  /**
+   * Used to customize a process's `stderr`.
+   * If not provided, a new pipe is created for this process.
+   *
+   * The default pipe will be created in flowing mode, meaning
+   * that any output is automatically read and passed to listeners
+   * rather than waiting for {@link Readable.read} to be called.
+   *
+   * Note that any pipes provided (including the default one)
+   * will automatically close when the process exits unless
+   * {@link PipeOptions.close} is set to `false`.
+   */
   stderr?: Pipe;
 }
 
 export interface PythonOptions {
-  /** Omit internal (debugger bridge) frames from DAP stack traces. */
-  filterInternals?: boolean;
-  /** Whether to run an interactive REPL when no `args` are given. Defaults to `false`. */
+  /**
+   * When no args are provided, whether or not to run an interactive REPL.
+   *
+   * If `false`, will run the first `.py` program found in the workspace.
+   *
+   * @default false
+   */
   repl?: boolean;
 }
 
 export interface CppOptions {
-  /** Globs, relative to `/`, of C/C++ sources to compile. Defaults to `["**\/*.{c,cc,cp,cpp,cxx,c++}"]` */
+  /**
+   * Globs of C/C++ sources to compile.
+   *
+   * @default ["**\/*.{c,cc,cp,cpp,cxx,c++}"]
+   */
   sources?: string[];
-  /** The directory where object files and the executable (`main`) are placed. Defaults to `/build` */
+
+  /**
+   * The directory where object files and the executable are placed.
+   *
+   * @default "/build"
+   */
   buildDir?: string;
-  /** Additional flags to apply when invoking the compiler. */
+
+  /**
+   * Additional flags that are passed to the compiler (`clang`).
+   */
   cxxFlags?: string[];
-  /** Additional flags to apply when invoking the linker. */
+
+  /**
+   * Additional flags that are passed to the linker (`lld`).
+   */
   lldFlags?: string[];
 }
 
 export interface RustOptions {
-  /** Globs, relative to `/`, of Rust sources to compile. Defaults to `["**\/*.rs"]` */
+  /**
+   * Globs of rust sources to compile.
+   *
+   * @default ["**\/*.{c,cc,cp,cpp,cxx,c++}"]
+   */
   sources?: string[];
-  /** The directory where object files and the executable (`main`) are placed. Defaults to `/build` */
+
+  /**
+   * The directory where object files and the executable are placed.
+   *
+   * @default "/build"
+   */
   buildDir?: string;
-  /** Additional flags to apply when invoking `rustc`. */
+
+  /**
+   * Additional flags that are passed to the compiler (`rustc`).
+   */
   rustFlags?: string[];
 }
 
@@ -86,11 +219,13 @@ export interface ToolchainOptionsMap {
   rust: RustOptions;
 }
 
-/** A language toolchain: a mini build system run as one process. */
+/**
+ * The name of a language toolchain.
+ */
 export type Toolchain = keyof ToolchainOptionsMap;
 
 /** Options for a step of a toolchain, which always shares the stdio of its process. */
-export type StepOptions = Omit<BaseOptions, 'debug' | 'stdin' | 'stdout' | 'stderr'> & {
+export type StepOptions = Omit<RunOptions, 'debug' | 'stdin' | 'stdout' | 'stderr'> & {
   /** Overrides `argv[0]`. */
   name?: string;
   /** Debug this step (`python` selects the Python debugger). */
@@ -100,7 +235,7 @@ export type StepOptions = Omit<BaseOptions, 'debug' | 'stdin' | 'stdout' | 'stde
 /** What a toolchain has access to. */
 export interface Context<T extends Toolchain> {
   args: string[];
-  options: BaseOptions & ToolchainOptionsMap[T];
+  options: RunOptions & ToolchainOptionsMap[T];
   env: Record<string, string>;
   fs: Filesystem;
   process: Process;

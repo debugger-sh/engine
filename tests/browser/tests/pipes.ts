@@ -40,6 +40,13 @@ test('writing to a closed pipe throws', async () => {
   await expect(pipe.write('x')).rejects.toThrow();
 });
 
+test('closing a pipe fails blocked writes', async () => {
+  const pipe = new Pipe({ capacity: 1 });
+  const written = pipe.write('ab');
+  pipe.close();
+  await expect(written).rejects.toThrow();
+});
+
 test('writes larger than the capacity wait for reads', async () => {
   const pipe = new Pipe({ capacity: 16 });
   const big = 'x'.repeat(1000);
@@ -141,6 +148,15 @@ test('pipes given to a killed process are closed', async () => {
   proc.kill();
   await proc;
   expect(stdout.closed).toBe(true);
+});
+
+test('closing a full stdout unblocks the process writing to it', async () => {
+  const tool = await withTool();
+  const stdout = new Pipe({ capacity: 1 });
+  const proc = tool.run('/bin/main', ['args', 'blocked'], { stdout });
+  await sleep(200);
+  stdout.close();
+  await expect(proc).resolves.toMatchObject({ killed: false });
 });
 
 test('pipes created with close: false are left open', async () => {

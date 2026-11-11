@@ -7,7 +7,7 @@ export type Timestamp = string | Date | number;
 /**
  * The timestamps of a file. Unspecified timestamps default to the current time.
  *
- * Note: `created` cannot be set yet, so it is ignored when mounting.
+ * Note: `created` cannot currently be set, so it is ignored when mounting.
  */
 export type Timestamps = {
   accessed?: Timestamp;

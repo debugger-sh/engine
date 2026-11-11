@@ -319,12 +319,6 @@ interface BaseOptions {
 
 interface PythonOptions {
   /**
-   * See the existing usage of this option.
-   * Note that this is moved from the existing debugger interface.
-   */
-  filterInternals?: boolean;
-
-  /**
    * Whether to run an interactive REPL when no `args` are given.
    *
    * Defaults to `false`.

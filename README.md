@@ -83,7 +83,7 @@ pipe.flow(); // consume every chunk as it arrives, firing `data` (and `end`)
 pipe.close();
 
 // Debugging (DAP): the process waits for the handshake
-const debuggable = engine.run('python', { debug: true, filterInternals: true });
+const debuggable = engine.run('python', { debug: true });
 debuggable.debugger.send(request); // returns the response synchronously
 debuggable.debugger.on('event', fn);
 ```

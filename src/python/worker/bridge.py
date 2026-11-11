@@ -184,7 +184,8 @@ class DapBridge(bdb.Bdb):
         self._nodes = 0
         stack = []
         f = frame
-        while f is not None:
+        # Frames below `botframe` belong to the debugger (`bdb.run` and this bridge).
+        while f is not None and f is not self.botframe:
             name = f.f_code.co_name
             path = f.f_code.co_filename
             if name == '<module>' and path == MAIN:
@@ -196,7 +197,6 @@ class DapBridge(bdb.Bdb):
                 "file": path,
                 "line": f.f_lineno,
                 "function": display,
-                "user": f.f_code.co_filename == MAIN,
                 "locals": [
                     self._format(n, v, 0)
                     for n, v in f.f_locals.items()

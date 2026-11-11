@@ -19,7 +19,6 @@ pub struct StackFrame {
     pub file: String,
     pub line: i64,
     pub function: String,
-    pub user: bool,
     pub locals: Vec<PythonVar>,
 }
 

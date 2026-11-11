@@ -37,8 +37,6 @@ export class Artifact {
 
 /**
  * A Debug Adapter Protocol (DAP) debugger, tied to one process.
- *
- * The process only makes progress once the DAP handshake (`configurationDone`) completes.
  */
 export class Debugger extends EventEmitter<DebuggerEventMap> {
   /** @internal */
@@ -56,12 +54,10 @@ export class Debugger extends EventEmitter<DebuggerEventMap> {
 
   /**
    * @internal
-   * @param filterInternals Omit internal (bridge) frames from Python stack traces.
    */
-  constructor(key: typeof Internals, filterInternals = false) {
+  constructor(key: typeof Internals) {
     super();
     internal(key);
-    this.#dap.setFilterInternals(filterInternals);
     this.#dap.on((message: unknown) => this.emit('event', message));
     this[Internals] = {
       receive: (message) => {
