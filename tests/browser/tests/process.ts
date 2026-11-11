@@ -1,3 +1,4 @@
+import { Pipe } from 'debugger-sh';
 import { expect, test } from 'vitest';
 
 import { eng, sleep, withTool } from '../helpers';
@@ -177,19 +178,39 @@ test('captures stderr', async () => {
   });
 });
 
-test('stdin larger than its buffer', async () => {
+test('stdin is closed by default', async () => {
   const tool = await withTool();
   const proc = tool.run('/bin/main', ['cat']);
+  expect(proc.stdin.closed).toBe(true);
+  await expect(proc.stdin.write('x')).rejects.toThrow('closed');
+  await expect(proc).outputs({ stdout: '' });
+});
+
+test('stdin: true opens stdin', async () => {
+  const tool = await withTool();
+  const proc = tool.run('/bin/main', ['cat'], { stdin: true });
+  const result = expect(proc).outputs({ stdout: 'open' });
+  expect(proc.stdin.closed).toBe(false);
+  await proc.stdin.write('open');
+  proc.stdin.close();
+  await result;
+});
+
+test('stdin larger than its buffer', async () => {
+  const tool = await withTool();
+  const stdin = new Pipe();
+  const proc = tool.run('/bin/main', ['cat'], { stdin });
   const big = 'x'.repeat(100_000);
   const result = expect(proc).outputs({ stdout: big });
-  await proc.stdin.write(big);
-  proc.stdin.close();
+  await stdin.write(big);
+  stdin.close();
   await result;
 });
 
 test('stdin is forwarded until closed', async () => {
   const tool = await withTool();
-  const proc = tool.run('/bin/main', ['cat']);
+  const stdin = new Pipe();
+  const proc = tool.run('/bin/main', ['cat'], { stdin });
   const result = expect(proc).outputs({ stdout: 'CS198! bytes' });
   expect(proc.stdin.closed).toBe(false);
   await proc.stdin.write('CS198!');

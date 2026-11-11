@@ -72,6 +72,13 @@ test('a pipe with a capacity of 1 buffers 1 byte', async () => {
   await written;
 });
 
+test('a pipe with a capacity of 0 starts closed', async () => {
+  const pipe = new Pipe({ capacity: 0 });
+  expect(pipe.closed).toBe(true);
+  await expect(pipe.write('a')).rejects.toThrow('closed');
+  expect((await pipe.read()).length).toBe(0);
+});
+
 test('lines() yields each line without its newline', async () => {
   const pipe = new Pipe();
   await pipe.write('a\nb\n\nc');

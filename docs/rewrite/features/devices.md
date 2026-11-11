@@ -149,7 +149,7 @@ Standard I/O should be implemented in terms of pipes. The current interface shou
 ```ts
 interface BaseOptions {
   /* ... */
-  stdin?: Pipe;
+  stdin?: Pipe | true;
   stdout?: Pipe;
   stderr?: Pipe;
 }
@@ -174,6 +174,8 @@ interface Process {
   stderr: Readable;
 }
 ```
+
+By default, processes that were spawned without explicitly configuring `stdin` are given a closed pipe, so that programs reading from it see end-of-file rather than waiting forever. This pipe has a capacity of 0. For interactive input, the caller creates a new pipe and passes it to `run` as `stdin`, or passes `stdin: true` as a shorthand for a new open pipe.
 
 By default, processes that were spawned without explicitly configuring `stdout`/`stderr` will have no readers, and therefore programs that write enough output will eventually block while waiting for a reader on the other end to consume from the buffer. For that reason, and only in the case that `BaseOptions` was not manually configured, the default behaviour of `stdout` and `stderr` is to call `flow` on the pipe used by these processes (this is handled separately for each stream). Listeners to the default `stderr` and `stdout` can still listen to bytes read e.g. via `on("data")`.
 

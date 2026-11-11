@@ -90,7 +90,7 @@ test('programs read stdin', async () => {
     'main.cpp':
       '#include <iostream>\nint main() { std::string s; std::cin >> s; std::cout << s.size(); }'
   });
-  const proc = engine.run('cpp');
+  const proc = engine.run('cpp', { stdin: true });
   await proc.stdin.write('CS198!\n');
   await expect(proc).outputs({ stdout: '6' });
 });

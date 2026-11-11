@@ -36,8 +36,33 @@ export type Stdio = { stdin: Pipe; stdout: Pipe; stderr: Pipe };
  * ```
  */
 export class Process implements PromiseLike<ProcessResult> {
+  /**
+   * The process's standard input.
+   *
+   * By default, this is closed so that programs reading from `stdin`
+   * do not hang forever. To configure interactive `stdin`, set {@link RunOptions.stdin}
+   * to `true` or pass your own {@link Pipe}.
+   */
   public readonly stdin: Writable;
+
+  /**
+   * The process's standard output.
+   *
+   * By default, the library automatically pulls data off the stream
+   * to avoid programs filling up the buffer and hanging forever.
+   * To manually control reading, pass your own {@link Pipe} to
+   * {@link RunOptions.stdout}.
+   */
   public readonly stdout: Readable;
+
+  /**
+   * The process's standard error.
+   *
+   * By default, the library automatically pulls data off the stream
+   * to avoid programs filling up the buffer and hanging forever.
+   * To manually control reading, pass your own {@link Pipe} to
+   * {@link RunOptions.stdout}.
+   */
   public readonly stderr: Readable;
 
   /**
@@ -217,6 +242,9 @@ export interface PipeOptions {
    * The maximum number of bytes this pipe's underlying buffer is able to hold.
    *
    * Defaults to 4096 (4 KiB).
+   *
+   * Any non-negative value is allowed, but passing 0 here will result
+   * in a pipe that starts out already closed.
    */
   capacity?: number;
 
@@ -304,6 +332,7 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
     };
     this.#header = new Int32Array(buffer, 0, 4);
     this.#data = new Uint8Array(buffer, HEADER);
+    if (capacity === 0) this.close();
   }
 
   public get closed(): boolean {

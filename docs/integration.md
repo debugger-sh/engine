@@ -48,11 +48,21 @@ proc.stdout.off('data', onOut);
 proc.stderr.off('data', onOut);
 ```
 
-**stdin** exposes `write(value: string | Uint8Array)` (UTF-8 for strings), and `close()` to signal end-of-file:
+**stdin** is closed by default, so programs read end-of-file. For interactive input, create a pipe and pass it to `run`. It exposes `write(value: string | Uint8Array)` (UTF-8 for strings), and `close()` to signal end-of-file:
 
 ```ts
+const stdin = new Pipe();
+const proc = engine.run('cpp', { stdin });
+await stdin.write('hello\n');
+await stdin.write(new TextEncoder().encode('hello\n'));
+stdin.close();
+```
+
+As a shorthand, `{ stdin: true }` creates a new open pipe, written via `proc.stdin`:
+
+```ts
+const proc = engine.run('cpp', { stdin: true });
 await proc.stdin.write('hello\n');
-await proc.stdin.write(new TextEncoder().encode('hello\n'));
 proc.stdin.close();
 ```
 

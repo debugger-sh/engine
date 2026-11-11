@@ -62,13 +62,13 @@ const proc = engine.run('cpp', ['program', 'args'], {
   env,
   sysroot,
   debug,
-  stdin, // pipes (by default, new pipes: stdout and stderr flow)
+  stdin, // pipes (by default, stdin is closed, and new stdout and stderr pipes flow; `stdin: true` opens it)
   stdout,
   stderr,
   devices: { '/dev/in': new Pipe(), '/dev/fb': new SharedArrayBuffer(size) },
   ...toolchainOptions
 });
-proc.stdin.write('input');
+proc.stdin.write('input'); // with `stdin: true` or your own pipe
 proc.stdin.close();
 proc.stdout.on('data', fn);
 proc.stderr.on('data', fn);

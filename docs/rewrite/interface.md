@@ -465,12 +465,16 @@ Each process object provides the `stdin`, `stdout`, and `stderr` objects, which 
  * For example, a single chunk of stdin could be partially eaten by the compiler/linker;
  * the remaining portion would be passed onto the user program.
  */
-const proc = engine.run('cpp');
+console.log(engine.run('cpp').stdin.closed); // true: stdin is closed by default
+
+/** For interactive input, pass a new pipe as stdin */
+const stdin = new Pipe();
+const proc = engine.run('cpp', { stdin });
 console.log(proc.stdin.closed); // false
 
 /** Write chunks and close stream */
-await proc.stdin.write('CS198!');
-proc.stdin.close();
+await stdin.write('CS198!');
+stdin.close();
 console.log(proc.stdin.closed); // true
 
 /** Listen for incremental output */

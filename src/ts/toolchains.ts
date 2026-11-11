@@ -118,13 +118,23 @@ export interface RunOptions {
 
   /**
    * Used to customize a process's `stdin`.
-   * If not provided, a new pipe is created for this process.
+   * If not provided, `stdin` defaults to a closed stream,
+   * so the process reads end-of-file.
    *
-   * Note that any pipes provided (including the default one)
+   * For interactive input, pass `true` here, or create a pipe and write to it as the process runs:
+   *
+   * ```ts
+   * const stdin = new Pipe();
+   * const proc = engine.run("python", { stdin });
+   * await stdin.write("input\n");
+   * stdin.close();
+   * ```
+   *
+   * Note that any pipes provided
    * will automatically close when the process exits unless
    * {@link PipeOptions.close} is set to `false`.
    */
-  stdin?: Pipe;
+  stdin?: Pipe | true;
 
   /**
    * Used to customize a process's `stdout`.
@@ -160,6 +170,8 @@ export interface PythonOptions {
    * When no args are provided, whether or not to run an interactive REPL.
    *
    * If `false`, will run the first `.py` program found in the workspace.
+   * If `true`, {@link RunOptions.stdin} will default `true` to enable
+   * interactive input.
    *
    * @default false
    */

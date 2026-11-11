@@ -169,8 +169,12 @@ export class Engine {
       pipe.flow();
       return pipe;
     };
+    const closed = () => new Pipe({ capacity: 0 });
+    const openStdin =
+      options.stdin === true ||
+      (options.stdin === undefined && 'repl' in options && Boolean(options.repl));
     const stdio = {
-      stdin: options.stdin ?? new Pipe(),
+      stdin: options.stdin instanceof Pipe ? options.stdin : openStdin ? new Pipe() : closed(),
       stdout: options.stdout ?? flowing(),
       stderr: options.stderr ?? flowing()
     };

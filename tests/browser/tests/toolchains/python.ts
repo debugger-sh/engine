@@ -56,7 +56,7 @@ test('runs a REPL with repl: true', async () => {
 
 test('input() reads stdin', async () => {
   const engine = await eng({ 'main.py': 'print(input()[::-1])' });
-  const proc = engine.run('python');
+  const proc = engine.run('python', { stdin: true });
   await proc.stdin.write('abc\n');
   await expect(proc).outputs({ stdout: 'cba\n' });
 });
