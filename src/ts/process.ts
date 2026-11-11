@@ -39,8 +39,8 @@ export class Process implements PromiseLike<ProcessResult> {
      * unregisters it. If the process has already been killed, it runs immediately.
      */
     onKill(kill: () => void): () => void;
-    /** Writes a message to this process' stderr. */
-    error(message: string): void;
+    /** Writes a message to this process' stderr, resolving once it is written. */
+    error(message: string): Promise<void>;
   };
 
   readonly #result: Promise<ProcessResult>;
@@ -69,7 +69,7 @@ export class Process implements PromiseLike<ProcessResult> {
         this.#killers.add(kill);
         return () => void this.#killers.delete(kill);
       },
-      error: (message) => void stdio.stderr.write(`${message}\n`).catch(() => {})
+      error: (message) => stdio.stderr.write(`${message}\n`).catch(() => {})
     };
 
     let kill!: (result: ProcessResult) => void;

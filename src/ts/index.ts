@@ -210,7 +210,7 @@ export class Engine {
       const [url, name] = commands[command];
       return this.#job(process, { url }, args, { name, ...options });
     }
-    process[Internals].error(`${command}: command not found`);
+    await process[Internals].error(`${command}: command not found`);
     return 127;
   }
 
@@ -266,8 +266,8 @@ export class Engine {
     options: StepOptions
   ): Promise<number> {
     const name = options.name ?? program.path ?? program.url ?? 'main';
-    const fail = ([code, message]: Failure) => (
-      process[Internals].error(`${name}: ${message}`),
+    const fail = async ([code, message]: Failure) => (
+      await process[Internals].error(`${name}: ${message}`),
       code
     );
     const debug = options.debug === 'python' ? 'python' : options.debug ? 'wasm' : undefined;
