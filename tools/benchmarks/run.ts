@@ -1,12 +1,10 @@
-// Times every program in `programs/<toolchain>/<program>/` with the engine's toolchains run
-// natively (`setup.sh` installs one, then `toolchain.sh` runs each trial), and with the engine
-// in Chromium on a throttled network: both the first run (a fresh browser profile, so toolchains
-// are downloaded) and a subsequent run (a new page in the same profile, so toolchains come from
-// the browser's HTTP cache).
+// Times every program in `programs/<toolchain>/<program>/` in the engine, cold (a fresh browser
+// profile, so toolchains are downloaded) and warm (a new page in the same profile, so toolchains
+// come from the HTTP cache), and with `--local`, natively (with `programs/<toolchain>/local.ts`).
 //
-// Usage: npm run tools:benchmarks -- [toolchain[/program] ...] [--runs=N]
+// Usage: npm run tools:benchmarks -- [toolchain[/program] ...] [--runs=N] [--local]
 import { serve } from 'bun';
-import { spawnSync } from 'node:child_process';
+import chalk from 'chalk';
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -20,18 +18,28 @@ const TOOLCHAINS = path.join(import.meta.dir, '.toolchains');
 
 /** The global average mobile network speed (Speedtest Global Index), in Mbps. */
 const NETWORK = { downloadMbps: 100, uploadMbps: 15 };
+const SERIES = ['local', 'cold', 'warm'] as const;
 
-type Series = 'local' | 'first' | 'subsequent';
+type Series = (typeof SERIES)[number];
 type Datapoint = { toolchain: string; program: string; series: Series; trial: number; ms: number };
+type Local = {
+  setup(dir: string): Promise<string>;
+  run(dir: string, program: string, out: string): Promise<string>;
+};
 
 const args = process.argv.slice(2);
 const runs = Number(args.find((arg) => arg.startsWith('--runs='))?.slice(7) ?? 10);
+const local = args.includes('--local');
 const filters = args.filter((arg) => !arg.startsWith('--'));
 
-if ((await readFile(path.join(DIST, 'debugger-sh.js'), 'utf8')).includes('http://localhost:')) {
-  console.error('dist/ is a development build: run `npm run build` first.');
+const info = (msg: string) => console.log(`${chalk.cyan('info')} ${msg}`);
+const die = (msg: string): never => {
+  console.error(`\n${chalk.red('error')} ${msg}`);
   process.exit(1);
-}
+};
+
+if ((await readFile(path.join(DIST, 'debugger-sh.js'), 'utf8')).includes('http://localhost:'))
+  die('dist/ is a development build: run `npm run build` first.');
 
 // Shared memory requires cross-origin isolation.
 const server = serve({
@@ -69,24 +77,14 @@ async function tree(dir: string): Promise<Record<string, unknown>> {
   );
 }
 
-/** Runs `programs/<toolchain>/<script>` with the toolchain's directory and `args`. */
-const script = (toolchain: string, name: string, args: string[], options = {}) =>
-  spawnSync(path.join(PROGRAMS, toolchain, name), [path.join(TOOLCHAINS, toolchain), ...args], {
-    encoding: 'utf8',
-    ...options
-  });
-
-/** Times building (into a fresh directory) and running a program with the native toolchain. */
-async function timeLocal(toolchain: string, dir: string) {
+/** Times building (into a fresh directory) and running a program with a local toolchain. */
+async function timeLocal(toolchain: Local, dir: string, program: string) {
   const out = await mkdtemp(path.join(os.tmpdir(), 'bench-'));
   const start = performance.now();
-  const result = script(toolchain, 'toolchain.sh', [out], {
-    cwd: dir
-  });
+  const stdout = await toolchain.run(dir, program, out);
   const ms = performance.now() - start;
   await rm(out, { recursive: true, force: true });
-  if (result.status !== 0) throw new Error(`${toolchain}: ${result.error ?? result.stderr}`);
-  return { ms, stdout: result.stdout };
+  return { ms, stdout };
 }
 
 /** Runs in the page: times creating an engine and running the program to completion. */
@@ -131,66 +129,85 @@ const stats = (xs: number[]) => {
 };
 
 const datapoints: Datapoint[] = [];
+const times = (toolchain: string, program: string, series: Series) =>
+  datapoints
+    .filter((d) => d.toolchain === toolchain && d.program === program && d.series === series)
+    .map((d) => d.ms);
 const versions: Record<string, string> = {};
 let agent = '';
 
-for (const toolchain of await readdir(PROGRAMS)) {
-  for (const entry of await readdir(path.join(PROGRAMS, toolchain), { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const program = entry.name;
-    const name = `${toolchain}/${program}`;
-    if (filters.length && !filters.some((filter) => name.startsWith(filter))) continue;
-    const dir = path.join(PROGRAMS, toolchain, program);
-    const record = (series: Series, trial: number, ms: number) => {
-      datapoints.push({ toolchain, program, series, trial, ms });
-      console.log(`${name}  ${series.padEnd(10)}  #${trial + 1}  ${ms.toFixed(0).padStart(6)} ms`);
-    };
+const programs: [string, string][] = [];
+for (const toolchain of await readdir(PROGRAMS))
+  for (const entry of await readdir(path.join(PROGRAMS, toolchain), { withFileTypes: true }))
+    if (
+      entry.isDirectory() &&
+      (!filters.length || filters.some((f) => `${toolchain}/${entry.name}`.startsWith(f)))
+    )
+      programs.push([toolchain, entry.name]);
+info(
+  `${programs.length} program(s), ${runs} trial(s) each${local ? ', with local toolchains' : ''}`
+);
 
-    if (!versions[toolchain]) {
-      if (script(toolchain, 'setup.sh', [], { stdio: 'inherit' }).status !== 0)
-        throw new Error(`${toolchain}: setup failed`);
-      versions[toolchain] = script(toolchain, 'toolchain.sh', ['--version']).stdout.split('\n')[0];
-    }
-    // An untimed warm-up run, so the local toolchain is in the OS's file cache like the engine's
-    // is in the browser's, also gives the output that the engine must match.
-    const { stdout: expected } = await timeLocal(toolchain, dir);
-    for (let trial = 0; trial < runs; trial++)
-      record('local', trial, (await timeLocal(toolchain, dir)).ms);
-
-    for (let trial = 0; trial < runs; trial++) {
-      const profile = await mkdtemp(path.join(os.tmpdir(), 'bench-profile-'));
-      const context = await chromium.launchPersistentContext(profile, { channel: 'chromium' });
-      try {
-        for (const series of ['first', 'subsequent'] as const) {
-          const page = await context.newPage();
-          // Only the engine is timed (not loading the page), so only it is throttled.
-          await page.goto(server.url.href);
-          const cdp = await context.newCDPSession(page);
-          await cdp.send('Network.emulateNetworkConditions', {
-            offline: false,
-            latency: 0,
-            downloadThroughput: (NETWORK.downloadMbps * 1e6) / 8,
-            uploadThroughput: (NETWORK.uploadMbps * 1e6) / 8
-          });
-          const result = await page.evaluate(inPage, {
-            library: '/debugger-sh.js',
-            toolchain,
-            files: await tree(dir)
-          });
-          await page.close();
-          if (result.exitCode !== 0 || result.stdout !== expected)
-            throw new Error(
-              `${name} failed in the engine (exit ${result.exitCode}):\n${result.stdout}${result.stderr}`
-            );
-          agent = result.agent;
-          record(series, trial, result.ms);
-        }
-      } finally {
-        await context.close();
-        await rm(profile, { recursive: true, force: true });
-      }
-    }
+for (const [toolchain, program] of programs) {
+  const name = `${toolchain}/${program}`;
+  const dir = path.join(PROGRAMS, toolchain, program);
+  const toolchainDir = path.join(TOOLCHAINS, toolchain);
+  const native: Local | undefined = local
+    ? await import(path.join(PROGRAMS, toolchain, 'local.ts'))
+    : undefined;
+  if (native && !versions[toolchain]) {
+    info(`setting up local ${toolchain} toolchain...`);
+    versions[toolchain] = await native.setup(toolchainDir);
   }
+  info(`${chalk.bold(name)}${native ? chalk.dim(` (local: ${versions[toolchain]})`) : ''}`);
+
+  // An untimed warm-up run, so the local toolchain is in the OS's file cache like the engine's
+  // is in the browser's, also gives the output that the engine must match.
+  const expected = native && (await timeLocal(native, toolchainDir, dir)).stdout;
+  const record = (series: Series, trial: number, ms: number) => {
+    datapoints.push({ toolchain, program, series, trial, ms });
+    const averages = SERIES.filter((s) => times(toolchain, program, s).length).map((s) => {
+      const { mean, stdev } = stats(times(toolchain, program, s));
+      return `${chalk.bold(s)} ${mean.toFixed(0)} ${chalk.dim(`± ${stdev.toFixed(0)}`)} ms`;
+    });
+    process.stdout.write(
+      `\r\x1b[2K ${chalk.blue('└─')} ${chalk.dim(`[${trial + 1}/${runs}]`)} ${averages.join('   ')}`
+    );
+  };
+
+  for (let trial = 0; trial < runs; trial++) {
+    if (native) record('local', trial, (await timeLocal(native, toolchainDir, dir)).ms);
+
+    const profile = await mkdtemp(path.join(os.tmpdir(), 'bench-profile-'));
+    const context = await chromium.launchPersistentContext(profile, { channel: 'chromium' });
+    for (const series of ['cold', 'warm'] as const) {
+      const page = await context.newPage();
+      // Only the engine is timed (not loading the page), so only it is throttled.
+      await page.goto(server.url.href);
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: false,
+        latency: 0,
+        downloadThroughput: (NETWORK.downloadMbps * 1e6) / 8,
+        uploadThroughput: (NETWORK.uploadMbps * 1e6) / 8
+      });
+      const result = await page.evaluate(inPage, {
+        library: '/debugger-sh.js',
+        toolchain,
+        files: await tree(dir)
+      });
+      await page.close();
+      if (result.exitCode !== 0 || (expected !== undefined && result.stdout !== expected))
+        die(
+          `${name} failed in the engine (exit ${result.exitCode}):\n${result.stdout}${result.stderr}`
+        );
+      agent = result.agent;
+      record(series, trial, result.ms);
+    }
+    await context.close();
+    await rm(profile, { recursive: true, force: true });
+  }
+  console.log();
 }
 
 const meta = {
@@ -209,17 +226,13 @@ const summary: Record<
   string,
   Record<string, Partial<Record<Series, ReturnType<typeof stats>>>>
 > = {};
-for (const { toolchain, program, series } of datapoints) {
-  const programs = (summary[toolchain] ??= {});
-  (programs[program] ??= {})[series] ??= stats(
-    datapoints
-      .filter((d) => d.toolchain === toolchain && d.program === program && d.series === series)
-      .map((d) => d.ms)
+for (const { toolchain, program, series } of datapoints)
+  ((summary[toolchain] ??= {})[program] ??= {})[series] ??= stats(
+    times(toolchain, program, series)
   );
-}
 
 await mkdir(OUTPUT, { recursive: true });
 await writeFile(path.join(OUTPUT, 'raw.json'), JSON.stringify({ meta, datapoints }, null, 2));
 await writeFile(path.join(OUTPUT, 'summary.json'), JSON.stringify({ meta, summary }, null, 2));
-console.log(`\nWrote ${path.relative(process.cwd(), OUTPUT)}/{summary,raw}.json`);
+console.log(`${chalk.green('ok')} wrote output/summary.json and output/raw.json`);
 await server.stop();

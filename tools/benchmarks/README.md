@@ -1,45 +1,21 @@
-# Benchmarks (`tools/benchmarks`)
+# Benchmarks
 
-Measures the total time (including compiling and linking) to run each program in
-`programs/<toolchain>/<program>/` three ways:
+Times how long each program in `programs/<toolchain>/<program>/` takes to compile and run:
 
-- **`local`**: the engine's toolchains (clang/lld 22.1.0, rustc 1.96.0, Python 3.11.3) run
-  natively, after one untimed warm-up run.
-- **`first`**: the engine in a fresh Chromium profile, so toolchains are downloaded.
-- **`subsequent`**: the engine in a new page of that same profile, so toolchains come from the
-  browser's HTTP cache.
+- **cold**: in the engine, in a fresh browser (toolchains are downloaded)
+- **warm**: in the engine, in the same browser again (toolchains are cached)
+- **local**: with the same toolchains run natively (only with `--local`)
 
-The engine is timed from `Engine.create()` until the program exits (loading the page is not
-timed), with the network throttled to 100 Mbps down / 15 Mbps up, roughly the global average
-mobile network speed (Speedtest Global Index).
+The network is throttled to 100 Mbps down / 15 Mbps up (the global average mobile speed).
 
 ```sh
-npm run build                                      # benchmark a release build, not `npm run dev`'s
-npm run tools:benchmarks                           # everything, 10 runs each
-npm run tools:benchmarks -- cpp python/hello-world --runs=20
+npm run build                                       # benchmark a release build
+npm run tools:benchmarks                            # all programs, 10 trials each
+npm run tools:benchmarks -- cpp --runs=20 --local   # only cpp, 20 trials, also run locally
 ```
 
-## Programs
+Results are written to `output/summary.json` (mean, median, stdev, min and max per series) and
+`output/raw.json` (every trial). `python3 figure.py` plots them as `output/figure.png`.
 
-Each program is a directory in `programs/<toolchain>/`, mounted at `/` in the engine. Natively,
-each toolchain has two scripts, both given the toolchain's directory (`.toolchains/<toolchain>`):
-
-- `setup.sh <toolchain dir>` runs once before the toolchain's trials, downloading native builds
-  of the engine's toolchain for macOS on Apple silicon (skipped if already downloaded).
-- `toolchain.sh <toolchain dir> <build dir>` runs each trial in the program's directory. Like the
-  engine, it compiles sources to objects, then links them with lld, then runs the executable.
-  Given `--version` instead of a build directory, it prints the toolchain's version.
-
-The engine's output must match the native output.
-
-## Output
-
-- `output/raw.json`: `{ meta, datapoints: [{ toolchain, program, series, trial, ms }] }`
-- `output/summary.json`: `{ meta, summary: { [toolchain]: { [program]: { [series]: stats } } } }`,
-  where `stats` is `{ n, mean, median, stdev, min, max }` in milliseconds.
-
-`meta` records the date, the number of runs, the machine, the browser, the network, and the version of
-each native toolchain.
-
-`python3 figure.py [program]` (with matplotlib) plots `summary.json` as `output/figure.png`: the mean of
-each series, per toolchain, for one program (`hello-world` by default).
+To add a program, add a directory to `programs/<toolchain>/`. Each toolchain's `local.ts`
+downloads it for your platform (macOS, Linux or Windows) and runs a program with it.

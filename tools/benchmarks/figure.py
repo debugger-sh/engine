@@ -15,12 +15,19 @@ TOOLCHAINS = {"cpp": "clang", "python": "python", "rust": "rustc"}
 # Each series' key, legend label, color, hatch, and the padding (in points) of its bar labels.
 SERIES = [
     ("local", "Local", "#de9575", None, 0.5),
-    ("first", "Engine (first run)", "#c95c60", "////", 4.5),
-    ("subsequent", "Engine (subsequent)", "#c95c60", None, 4.5),
+    ("cold", "Engine (cold)", "#c95c60", "////", 4.5),
+    ("warm", "Engine (warm)", "#c95c60", None, 4.5),
 ]
 toolchains = [t for t in TOOLCHAINS if program in data["summary"].get(t, {})]
 SIZES = {"tick": 15, "label": 15, "legend": 9.6, "bar": 9}
-version = lambda t: re.search(r"\d+\.\d+\.\d+", data["meta"]["versions"][t])[0]
+# Local toolchains (and so their versions) are only benchmarked with `--local`.
+SERIES = [s for s in SERIES if s[0] in data["summary"][toolchains[0]][program]]
+
+
+def tick(t):
+    version = re.search(r"\d+\.\d+\.\d+", data["meta"]["versions"].get(t, ""))
+    return f"{TOOLCHAINS[t]} v{version[0]}" if version else TOOLCHAINS[t]
+
 
 plt.style.use("seaborn-v0_8-whitegrid")
 plt.rcParams.update({
@@ -34,13 +41,13 @@ fig = plt.figure(figsize=(7.6, 4.7))
 ax = fig.add_axes((0.217, 0.115, 0.728, 0.819))
 width, top = 1 / 6, 0
 for i, (key, label, color, hatch, padding) in enumerate(SERIES):
-    xs = [x + (i - 1) * width for x in range(len(toolchains))]
+    xs = [x + (i - (len(SERIES) - 1) / 2) * width for x in range(len(toolchains))]
     means = [data["summary"][t][program][key]["mean"] for t in toolchains]
     top = max(top, *means)
     bars = ax.bar(xs, means, width, label=label, color=color, hatch=hatch, edgecolor="white", linewidth=0.3 if hatch else 0)
     ax.bar_label(bars, labels=[f"{m:.0f}" for m in means], padding=padding, fontsize=SIZES["bar"])
 
-ax.set_xticks(range(len(toolchains)), [f"{TOOLCHAINS[t]} v{version(t)}" for t in toolchains])
+ax.set_xticks(range(len(toolchains)), [tick(t) for t in toolchains])
 ax.tick_params(labelsize=SIZES["tick"], pad=4.5)
 ax.set_ylabel("Total Runtime (ms)", fontsize=SIZES["label"], labelpad=2.5)
 ax.set_ylim(0, top * 1.15)
