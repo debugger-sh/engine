@@ -284,13 +284,12 @@ async function waitForEvent(
     }
     const remaining = endAt - Date.now();
     if (remaining <= 0) break;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
       waitForNext(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), remaining))
-    ]).catch((err) => {
-      if (String(err).includes('timeout')) return;
-      throw err;
-    });
+      new Promise((resolve) => (timer = setTimeout(resolve, remaining)))
+    ]);
+    clearTimeout(timer);
   }
   throw new Error(`timed out waiting for event '${eventName}' after ${timeoutMs}ms`);
 }
