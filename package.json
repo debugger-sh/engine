@@ -35,6 +35,7 @@
     "test": "vitest run --config tests/browser/vitest.config.ts",
     "dev": "cd tools/dev && npm run dev --",
     "tools:dap": "cd tools/dap && npm run test --",
+    "tools:benchmarks": "cd tools/benchmarks && npm run bench --",
     "prepublishOnly": "npm run build:release",
     "prepare": "husky"
   },
