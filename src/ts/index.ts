@@ -53,11 +53,16 @@ const modules = new Map<string, Promise<WebAssembly.Module | Failure>>();
 /** Loaded sysroots (or failures), by URL. Shared by all engines, never copied. */
 const sysrootCache = new Map<string, Promise<Fs | Failure>>();
 
-async function fetchBytes(url: string): Promise<Uint8Array<ArrayBuffer> | Failure> {
+async function fetchResponse(url: string): Promise<Response | Failure> {
   // Toolchain binaries are versioned by URL, so they can be cached indefinitely.
   const response = await fetch(url, { cache: 'force-cache' }).catch(() => undefined);
   if (!response?.ok) return [127, `network error (${response?.status ?? 0})`];
-  return new Uint8Array(await response.arrayBuffer());
+  return response;
+}
+
+async function fetchBytes(url: string): Promise<Uint8Array<ArrayBuffer> | Failure> {
+  const response = await fetchResponse(url);
+  return isFailure(response) ? response : new Uint8Array(await response.arrayBuffer());
 }
 
 function cached<T>(
@@ -292,9 +297,9 @@ export class Engine {
       bytes = fetched;
     } else if (program.url) {
       const compiled = await cached(modules, program.url, async () => {
-        const fetched = await fetchBytes(program.url!);
-        if (isFailure(fetched)) return fetched;
-        return WebAssembly.compile(fetched).catch((): Failure => [126, 'cannot execute']);
+        const response = await fetchResponse(program.url!);
+        if (isFailure(response)) return response;
+        return WebAssembly.compileStreaming(response).catch((): Failure => [126, 'cannot execute']);
       });
       if (isFailure(compiled)) return fail(compiled);
       module = compiled;
