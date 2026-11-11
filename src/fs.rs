@@ -436,18 +436,6 @@ impl Fs {
         Self::from_fs(mem_fs::FileSystem::default())
     }
 
-    /// Takes ownership of a filesystem created on another thread (see [`Fs::into_ptr`]).
-    pub fn from_ptr(ptr: u32) -> Self {
-        Self(ptr as *mut mem_fs::FileSystem)
-    }
-
-    /// Leaks this handle so it can be sent to another thread.
-    pub fn into_ptr(self) -> u32 {
-        let ptr = self.0 as u32;
-        std::mem::forget(self);
-        ptr
-    }
-
     /// A pointer through which workers may borrow this filesystem (see [`Shared::from_ptr`]).
     pub fn ptr(&self) -> u32 {
         self.0 as u32
@@ -596,13 +584,6 @@ impl Fs {
         }
         Ok(tar.into_inner()?.finish()?)
     }
-}
-
-/// Builds a sysroot filesystem from an archive. Returns a pointer for [`Fs::from_ptr`].
-pub fn sysroot(bytes: &[u8]) -> Result<u32, JsError> {
-    let fs = Fs::new();
-    fs.extract(Path::new("/"), bytes)?;
-    Ok(fs.into_ptr())
 }
 
 /// Resolves a path against `/`, lexically handling `.` and `..`.

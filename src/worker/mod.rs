@@ -88,12 +88,6 @@ pub fn worker_init(gate: u32) {
     gate::install(unsafe { &*(gate as *const Gate) });
 }
 
-/// Builds a sysroot from an archive, returning a pointer for `Fs.from_ptr`.
-#[wasm_bindgen]
-pub fn worker_sysroot(bytes: &[u8]) -> Result<u32, JsError> {
-    crate::fs::sysroot(bytes)
-}
-
 /// Runs a job to completion, returning its exit code.
 #[wasm_bindgen]
 pub async fn worker_run(job: JsValue) -> Result<i32, JsError> {

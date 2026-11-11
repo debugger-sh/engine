@@ -251,18 +251,14 @@ export class Engine {
     return (toolchains[name] as (ctx: Context<Toolchain>) => Promise<number>)(ctx);
   }
 
-  /** Loads a sysroot in a worker (fetching and extracting it in shared memory). */
+  /** Loads a sysroot, fetching and extracting it into shared memory. */
   #sysroot(url: string): Promise<Fs | Failure> {
     return cached(sysrootCache, url, async () => {
-      const worker = await this.#pool.acquire();
-      const message = await new Promise<WorkerMessage>((resolve) => {
-        worker.worker.addEventListener('message', (e) => resolve(e.data), { once: true });
-        worker.worker.postMessage({ type: 'sysroot', url });
-      });
-      this.#pool.release(worker);
-      if (message.type === 'error') throw new Error(String(message.message));
-      if (message.ptr === undefined) return [127, `network error (${message.status})`];
-      return Fs.from_ptr(message.ptr as number);
+      const bytes = await fetchBytes(url);
+      if (isFailure(bytes)) return bytes;
+      const fs = new Fs();
+      await fs.mount('/', bytes);
+      return fs;
     });
   }
 
