@@ -6,7 +6,7 @@ Times how long each program in `programs/<toolchain>/<program>/` takes to compil
 - **warm**: in the engine, in the same browser again (toolchains are cached)
 - **local**: with the same toolchains run natively (only with `--local`)
 
-The network is throttled to 100 Mbps down / 15 Mbps up (the global average mobile speed).
+The network is throttled to 100 Mbps down / 15 Mbps up to ensure consistent results.
 
 ```sh
 npm run build                                       # benchmark a release build
