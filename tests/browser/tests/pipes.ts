@@ -93,6 +93,17 @@ test('data and end fire when the pipe is read, and listening does not read', asy
   expect(events).toEqual(['a', 'end']);
 });
 
+test('text decodes characters split across chunks', async () => {
+  const pipe = new Pipe({ capacity: 1 });
+  const texts: string[] = [];
+  pipe.on('text', (text) => texts.push(text));
+  pipe.flow();
+  await pipe.write('é!');
+  pipe.close();
+  await new Promise<void>((resolve) => pipe.on('end', resolve));
+  expect(texts).toEqual(['é', '!']);
+});
+
 test('flowing pipes are consumed without reads', async () => {
   const pipe = new Pipe();
   let data = '';

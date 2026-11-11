@@ -125,16 +125,30 @@ export class Process implements PromiseLike<ProcessResult> {
 // │ Pipes                                                                    │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
+interface ReadableEventsMap {
+  data: [Uint8Array];
+  text: [string];
+  end: [];
+}
+
 /**
  * The readable end of a {@link Pipe}.
  */
-export interface Readable
-  extends AsyncIterable<Uint8Array>, EventEmitter<{ data: [Uint8Array]; end: [] }> {
+export interface Readable extends AsyncIterable<Uint8Array>, EventEmitter<ReadableEventsMap> {
   /**
    * Emitted when bytes are available from the stream.
    * @param chunk The available bytes.
    */
   on(event: 'data', listener: (chunk: Uint8Array) => void): this;
+
+  /**
+   * Emitted with the UTF-8 text decoded from the stream.
+   *
+   * This is the same as decoding the data from the "data" event in streaming mode.
+   *
+   * @param text The decoded text.
+   */
+  on(event: 'text', listener: (text: string) => void): this;
 
   /**
    * Emitted after the writer closes the stream.
@@ -262,10 +276,7 @@ const encoder = new TextEncoder();
  * but know that this attempting to write to or read from the pipe concurrently
  * will cause race conditions.
  */
-export class Pipe
-  extends EventEmitter<{ data: [Uint8Array]; end: [] }>
-  implements Readable, Writable
-{
+export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, Writable {
   /** @internal */
   readonly [Internals]: {
     buffer: SharedArrayBuffer;
@@ -278,6 +289,7 @@ export class Pipe
   /** In flowing mode, the pending read of the internal loop, shared by every reader. */
   #next?: Promise<Uint8Array>;
   #ended = false;
+  readonly #decoder = new TextDecoder();
 
   constructor({ capacity = 4096, close = true }: PipeOptions = {}) {
     super();
@@ -382,10 +394,15 @@ export class Pipe
         Atomics.store(this.#header, READ, end % this.#data.length);
         this.#notify();
         this.emit('data', chunk);
+        if (this.listenerCount('text'))
+          this.emit('text', this.#decoder.decode(chunk, { stream: true }));
         return chunk;
       }
       if (this.closed) {
-        if (!this.#ended) this.emit('end');
+        if (!this.#ended) {
+          this.emit('text', this.#decoder.decode());
+          this.emit('end');
+        }
         this.#ended = true;
         return new Uint8Array();
       }

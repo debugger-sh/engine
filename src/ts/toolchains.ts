@@ -57,7 +57,7 @@ export interface RunOptions {
    *
    * The debugging interface will be accessible through {@link Process.debugger}.
    * Currently, WASI executables with debug info (e.g. those compiled via the `rust`
-   * and `cpp` toolchains) as well Python programs support debugging.
+   * and `cpp` toolchains) as well Python programs currently support debugging.
    */
   debug?: boolean;
 
