@@ -40,8 +40,7 @@ export class Process implements PromiseLike<ProcessResult> {
    * The process's standard input.
    *
    * By default, this is closed so that programs reading from `stdin`
-   * do not hang forever. To configure interactive `stdin`, set {@link RunOptions.stdin}
-   * to `true` or pass your own {@link Pipe}.
+   * do not hang forever. To configure it, see {@link RunOptions.stdin}.
    */
   public readonly stdin: Writable;
 
@@ -423,19 +422,25 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
         Atomics.store(this.#header, READ, end % this.#data.length);
         this.#notify();
         this.emit('data', chunk);
-        if (this.listenerCount('text'))
-          this.emit('text', this.#decoder.decode(chunk, { stream: true }));
+        this.#text(chunk);
         return chunk;
       }
       if (this.closed) {
         if (!this.#ended) {
-          this.emit('text', this.#decoder.decode());
+          this.#text();
           this.emit('end');
+          this.#ended = true;
         }
-        this.#ended = true;
         return new Uint8Array();
       }
       await Atomics.waitAsync(this.#header, SEQUENCE, sequence).value;
+    }
+  }
+
+  #text(chunk?: Uint8Array) {
+    if (this.listenerCount('text')) {
+      const text = this.#decoder.decode(chunk, { stream: true });
+      if (text) this.emit('text', text);
     }
   }
 

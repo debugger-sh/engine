@@ -196,6 +196,20 @@ test('stdin: true opens stdin', async () => {
   await result;
 });
 
+test('stdin string is written and closed', async () => {
+  const tool = await withTool();
+  const proc = tool.run('/bin/main', ['cat'], { stdin: 'hello' });
+  expect(proc.stdin.closed).toBe(true);
+  await expect(proc).outputs({ stdout: 'hello' });
+});
+
+test('stdin Uint8Array is written and closed', async () => {
+  const tool = await withTool();
+  await expect(
+    tool.run('/bin/main', ['cat'], { stdin: new TextEncoder().encode('bytes') })
+  ).outputs({ stdout: 'bytes' });
+});
+
 test('stdin larger than its buffer', async () => {
   const tool = await withTool();
   const stdin = new Pipe();

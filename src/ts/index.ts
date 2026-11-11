@@ -170,11 +170,24 @@ export class Engine {
       return pipe;
     };
     const closed = () => new Pipe({ capacity: 0 });
-    const openStdin =
-      options.stdin === true ||
-      (options.stdin === undefined && 'repl' in options && Boolean(options.repl));
+    const stdin = (): Pipe => {
+      const value = options.stdin;
+      if (value instanceof Pipe) return value;
+      if (typeof value === 'string' || value instanceof Uint8Array) {
+        const bytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
+        const pipe = new Pipe({ capacity: bytes.length });
+        if (bytes.length) {
+          pipe.write(bytes); // runs immediately
+          pipe.close();
+        }
+        return pipe;
+      }
+      if (value === true) return new Pipe();
+      if (value === undefined && 'repl' in options && Boolean(options.repl)) return new Pipe();
+      return closed();
+    };
     const stdio = {
-      stdin: options.stdin instanceof Pipe ? options.stdin : openStdin ? new Pipe() : closed(),
+      stdin: stdin(),
       stdout: options.stdout ?? flowing(),
       stderr: options.stderr ?? flowing()
     };

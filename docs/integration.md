@@ -66,6 +66,12 @@ await proc.stdin.write('hello\n');
 proc.stdin.close();
 ```
 
+Or pass a string / `Uint8Array` to preload stdin and close it immediately:
+
+```ts
+await engine.run('cpp', { stdin: 'hello\n' });
+```
+
 To stop a running program (it resolves with `{ exitCode: 137, killed: true }`):
 
 ```ts

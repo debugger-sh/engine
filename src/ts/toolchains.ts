@@ -118,8 +118,11 @@ export interface RunOptions {
 
   /**
    * Used to customize a process's `stdin`.
-   * If not provided, `stdin` defaults to a closed stream,
+   * If not provided, `stdin` defaults to a closed, empty stream,
    * so the process reads end-of-file.
+   *
+   * To pass data to `stdin`, provide a string or bytes here.
+   * Programs will read this data followed by end-of-file.
    *
    * For interactive input, pass `true` here, or create a pipe and write to it as the process runs:
    *
@@ -130,11 +133,10 @@ export interface RunOptions {
    * stdin.close();
    * ```
    *
-   * Note that any pipes provided
-   * will automatically close when the process exits unless
+   * Note that any pipes provided will automatically close when the process exits unless
    * {@link PipeOptions.close} is set to `false`.
    */
-  stdin?: Pipe | true;
+  stdin?: Pipe | true | string | Uint8Array;
 
   /**
    * Used to customize a process's `stdout`.
