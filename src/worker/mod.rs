@@ -12,7 +12,6 @@ use wasmer_wasix::{WasiEnv, WasiError, WasiFunctionEnv};
 use crate::debug::instrument::{InstrumenterResult, instrument_wasm};
 use crate::fs::{Root, Shared, normalize};
 use crate::python::worker::BRIDGE;
-use crate::types::WorkerOut;
 use crate::util::weak_error;
 
 use debuggee::Debuggee;
@@ -131,11 +130,9 @@ async fn run(job: Job) -> Result<i32, JsError> {
     let mut debuggee = None;
     let bytes = match (bytes, debug == Some(Debug::Wasm)) {
         (Some(wasm), true) => {
-            WorkerOut::Artifact { data: &wasm, name: "pre.wasm".into() }.send();
             let Ok(InstrumenterResult { info, wasm }) = instrument_wasm(&wasm) else {
                 return fail(126, "cannot execute");
             };
-            WorkerOut::Artifact { data: &wasm, name: "post.wasm".into() }.send();
             debuggee = Some(Debuggee::new(info));
             Some(wasm)
         }

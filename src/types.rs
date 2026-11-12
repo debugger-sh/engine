@@ -92,18 +92,9 @@ offset_type!(
 
 #[derive(Tsify, Serialize)]
 #[serde(tag = "type")]
-pub enum WorkerOut<'a> {
+pub enum WorkerOut {
     #[serde(rename = "debug")]
     Debug { info: DebugInfo },
-
-    /// Emit a build/engine artifact for the main thread to consume.
-    #[serde(rename = "artifact")]
-    Artifact {
-        #[tsify(type = "Uint8Array")]
-        #[serde(with = "serde_bytes")]
-        data: &'a [u8],
-        name: String,
-    },
 
     /// Indicate that execution has paused (for DWARF backends: the Python bridge instead
     /// reports pauses through its devices, see `Debugger` in `src/ts/debugger.ts`).
@@ -111,7 +102,7 @@ pub enum WorkerOut<'a> {
     Paused { reason: PauseReason },
 }
 
-impl<'a> WorkerOut<'a> {
+impl WorkerOut {
     pub fn send(&self) {
         let scope = DedicatedWorkerGlobalScope::from(JsValue::from(js_sys::global()));
         scope

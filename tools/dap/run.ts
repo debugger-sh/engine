@@ -44,7 +44,6 @@ export type Lang = 'c' | 'python' | 'rust';
 
 export type BackendOptions = {
   testDir: string;
-  testOutputDir: string;
   fsNode: Record<string, Json>;
   lang: Lang;
 };
@@ -309,7 +308,7 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
 
   const lang: Lang = file.lang ?? 'c';
   const fsNode = await collectFsNode(testDir);
-  const backendOpts: BackendOptions = { testDir, testOutputDir, fsNode, lang };
+  const backendOpts: BackendOptions = { testDir, fsNode, lang };
   const backend =
     lang === 'python'
       ? opts.debugpy

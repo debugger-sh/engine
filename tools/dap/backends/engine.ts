@@ -1,9 +1,4 @@
-import { $ } from 'bun';
 import chalk from 'chalk';
-import type { Artifact } from 'debugger-sh';
-import { existsSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import process from 'node:process';
 
 import type { Backend, BackendOptions, Json } from '../run';
@@ -24,17 +19,9 @@ export async function createEngineBackend(opts: BackendOptions): Promise<Backend
   proc.stderr.on('data', onIo);
 
   const eventCbs: ((e: Json) => void)[] = [];
-  const artifactTasks: Promise<void>[] = [];
 
   proc.debugger.on('event', (msg: unknown) => {
     for (const cb of eventCbs) cb(msg as Json);
-  });
-  proc.debugger.on('artifact', (artifact) => {
-    const task = handleArtifactOutput(opts.testOutputDir, artifact).catch((err) => {
-      console.log(`${chalk.cyan('info')} artifact output failed: ${String(err)}`);
-    });
-    artifactTasks.push(task);
-    void task;
   });
 
   return {
@@ -64,54 +51,7 @@ export async function createEngineBackend(opts: BackendOptions): Promise<Backend
       await Promise.race([proc, new Promise((resolve) => setTimeout(resolve, 1500))]).catch(() => {
         /* swallow; reported as test failure if needed */
       });
-      await Promise.all(artifactTasks);
       engine.dispose();
     }
   };
-}
-
-function isObjectLike(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function toUint8Array(value: unknown): Uint8Array | null {
-  if (value instanceof Uint8Array) return value;
-  if (Array.isArray(value) && value.every((v) => typeof v === 'number'))
-    return Uint8Array.from(value);
-  return null;
-}
-
-async function writeDerivedArtifacts(
-  testOutputDir: string,
-  wasmPath: string,
-  prefix: 'pre' | 'post'
-) {
-  const sh = (cmd: string) => $`sh -lc ${cmd}`.quiet().nothrow();
-
-  if (prefix === 'pre')
-    await sh(
-      `which llvm-dwarfdump >/dev/null 2>&1 && llvm-dwarfdump "${wasmPath}" > "${path.join(testOutputDir, 'pre.dwarf')}"`
-    );
-
-  const watPath = path.join(testOutputDir, `${prefix}.wat`);
-  await sh(`which wasm-tools >/dev/null 2>&1 && wasm-tools print "${wasmPath}" > "${watPath}"`);
-
-  if (!existsSync(watPath))
-    await sh(`which wasm2wat >/dev/null 2>&1 && wasm2wat "${wasmPath}" > "${watPath}"`);
-}
-
-async function handleArtifactOutput(testOutputDir: string, artifact: Artifact) {
-  if (!isObjectLike(artifact)) return;
-  if (typeof artifact.name !== 'string') return;
-  if (artifact.name !== 'pre.wasm' && artifact.name !== 'post.wasm') return;
-  const data = toUint8Array(artifact.data);
-  if (!data) return;
-
-  const wasmPath = path.join(testOutputDir, artifact.name);
-  await writeFile(wasmPath, data);
-  await writeDerivedArtifacts(
-    testOutputDir,
-    wasmPath,
-    artifact.name === 'pre.wasm' ? 'pre' : 'post'
-  );
 }

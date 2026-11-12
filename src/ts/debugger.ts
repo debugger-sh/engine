@@ -6,34 +6,7 @@ import { internal, Internals } from './util';
 
 type DebuggerEventMap = {
   event: [unknown];
-  artifact: [Artifact];
 };
-
-/** A file emitted by the engine while debugging (e.g. the instrumented WebAssembly). */
-export class Artifact {
-  public readonly name: string;
-  public readonly data: Uint8Array;
-
-  /** @internal */
-  constructor(key: typeof Internals, name: string, data: Uint8Array) {
-    internal(key);
-    this.name = name;
-    this.data = data;
-  }
-
-  public download() {
-    const bytes = new Uint8Array(this.data);
-    const blob = new Blob([bytes]);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = this.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-}
 
 /**
  * A Debug Adapter Protocol (DAP) debugger, tied to one process.
@@ -60,18 +33,7 @@ export class Debugger extends EventEmitter<DebuggerEventMap> {
     internal(key);
     this.#dap.on((message: unknown) => this.emit('event', message));
     this[Internals] = {
-      receive: (message) => {
-        if (message.type === 'artifact')
-          this.emit(
-            'artifact',
-            new Artifact(
-              Internals,
-              message.name as string,
-              new Uint8Array(message.data as Uint8Array)
-            )
-          );
-        else this.#dap.receive(message);
-      },
+      receive: (message) => this.#dap.receive(message),
       python: () => {
         const [commands, pauses] = [new Pipe(), new Pipe()];
         // Commands are written in turn, each waiting (in chunks) for the bridge to read it.

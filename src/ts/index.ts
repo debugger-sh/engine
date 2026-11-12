@@ -376,7 +376,7 @@ export class Engine {
   }
 }
 
-export type { Artifact, Debugger } from './debugger';
+export type { Debugger } from './debugger';
 export type {
   Directory,
   ExportOptions,
