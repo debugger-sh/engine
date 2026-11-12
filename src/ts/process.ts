@@ -242,8 +242,7 @@ export interface PipeOptions {
    *
    * Defaults to 4096 (4 KiB).
    *
-   * Any non-negative value is allowed, but passing 0 here will result
-   * in a pipe that starts out already closed.
+   * Any non-negative value is allowed. Passing 0 results in the pipe being already closed.
    */
   capacity?: number;
 
