@@ -336,7 +336,8 @@ export class Engine {
     const devices = Object.entries({ ...options.devices, ...python }).map(([path, device]) => {
       const pipe = device instanceof Pipe;
       const buffer = pipe ? device[Internals].buffer : device;
-      const write = device instanceof Duplex ? device[Internals].write[Internals].buffer : buffer;
+      const write =
+        device instanceof Duplex ? device[Internals].write[Internals].buffer : undefined;
       return { path: join(path), buffer, pipe, write };
     });
     const job = {

@@ -19,12 +19,12 @@ pub struct Device {
     pub path: PathBuf,
     #[serde(with = "serde_wasm_bindgen::preserve")]
     buffer: js_sys::SharedArrayBuffer,
-    /// Whether this is a pipe or duplex ([`DuplexDevice`]), rather than a [`SharedBufferDevice`].
+    /// Whether `buffer` backs a [`PipeDevice`] (rather than a [`SharedBufferDevice`]).
     pipe: bool,
     /// For a [`DuplexDevice`], the buffer of the pipe the main thread writes to (which the
-    /// device reads, writing to `buffer`). Otherwise, the same as `buffer`.
-    #[serde(with = "serde_wasm_bindgen::preserve")]
-    write: js_sys::SharedArrayBuffer,
+    /// device reads, writing to `buffer`).
+    #[serde(default, with = "crate::util::preserve_option")]
+    write: Option<js_sys::SharedArrayBuffer>,
 }
 
 // SAFETY: workers are single-threaded, and the buffer is only accessed through atomics or
@@ -34,12 +34,13 @@ unsafe impl Sync for Device {}
 
 impl Device {
     pub fn open(&self) -> Box<dyn VirtualFile + Send + Sync> {
-        match self.pipe {
-            true => Box::new(DuplexDevice {
-                read: PipeDevice::new(&self.write, None),
+        match (self.pipe, &self.write) {
+            (true, Some(write)) => Box::new(DuplexDevice {
+                read: PipeDevice::new(write, None),
                 write: PipeDevice::new(&self.buffer, None),
             }),
-            false => Box::new(SharedBufferDevice::new(&self.buffer)),
+            (true, None) => Box::new(PipeDevice::new(&self.buffer, None)),
+            (false, _) => Box::new(SharedBufferDevice::new(&self.buffer)),
         }
     }
 }

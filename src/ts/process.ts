@@ -232,6 +232,9 @@ export interface Writable {
    * Readers will be notified of the end of stream.
    */
   close(): void;
+
+  /** Whether the stream has been closed. */
+  readonly closed: boolean;
 }
 
 export interface PipeOptions {
