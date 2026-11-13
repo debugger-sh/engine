@@ -232,9 +232,6 @@ export interface Writable {
    * Readers will be notified of the end of stream.
    */
   close(): void;
-
-  /** Whether the stream has been closed. */
-  readonly closed: boolean;
 }
 
 export interface PipeOptions {
@@ -308,8 +305,6 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
   readonly [Internals]: {
     buffer: SharedArrayBuffer;
     close: boolean;
-    /** For a {@link Duplex}, the pipe processes read from (writing to `buffer`). */
-    input?: Pipe;
     /** Resolves once a flowing pipe has ended (immediately, for a paused one). */
     drained(): Promise<void>;
   };
@@ -466,17 +461,21 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
  * ```
  */
 export class Duplex extends Pipe {
+  /** @internal `write` is the pipe written to (and read by processes). */
+  declare readonly [Internals]: Pipe[typeof Internals] & { write: Pipe };
+
   constructor(options: PipeOptions = {}) {
     super(options);
-    this[Internals].input = new Pipe(options);
+    this[Internals].write = new Pipe(options);
   }
 
   public override write(value: Uint8Array | string): Promise<void> {
-    return this[Internals].input!.write(value);
+    return this[Internals].write.write(value);
   }
 
   public override close(): void {
-    this[Internals].input?.close(); // absent while `super` closes a pipe without capacity
+    // `write` is still absent when `super` closes a pipe without capacity.
+    this[Internals].write?.close();
     super.close();
   }
 }

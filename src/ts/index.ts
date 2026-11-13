@@ -2,7 +2,7 @@ import init, { Fs, type InitOutput } from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
 import { Filesystem } from './fs';
-import { Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
+import { Duplex, Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
 import {
   commands,
   type Context,
@@ -336,8 +336,9 @@ export class Engine {
     const devices = Object.entries({ ...options.devices, ...python }).map(([path, device]) => {
       const pipe = device instanceof Pipe;
       const buffer = pipe ? device[Internals].buffer : device;
-      const input = pipe ? device[Internals].input?.[Internals].buffer : undefined;
-      return { path: join(path), buffer, pipe, input };
+      const write =
+        device instanceof Duplex ? device[Internals].write[Internals].buffer : undefined;
+      return { path: join(path), buffer, pipe, write };
     });
     const job = {
       name,

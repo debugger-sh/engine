@@ -181,7 +181,6 @@ test('captures stderr', async () => {
 test('stdin is closed by default', async () => {
   const tool = await withTool();
   const proc = tool.run('/bin/main', ['cat']);
-  expect(proc.stdin.closed).toBe(true);
   await expect(proc.stdin.write('x')).rejects.toThrow('closed');
   await expect(proc).outputs({ stdout: '' });
 });
@@ -190,7 +189,6 @@ test('stdin: true opens stdin', async () => {
   const tool = await withTool();
   const proc = tool.run('/bin/main', ['cat'], { stdin: true });
   const result = expect(proc).outputs({ stdout: 'open' });
-  expect(proc.stdin.closed).toBe(false);
   await proc.stdin.write('open');
   proc.stdin.close();
   await result;
@@ -199,7 +197,6 @@ test('stdin: true opens stdin', async () => {
 test('stdin string is written and closed', async () => {
   const tool = await withTool();
   const proc = tool.run('/bin/main', ['cat'], { stdin: 'hello' });
-  expect(proc.stdin.closed).toBe(true);
   await expect(proc).outputs({ stdout: 'hello' });
 });
 
@@ -226,11 +223,11 @@ test('stdin is forwarded until closed', async () => {
   const stdin = new Pipe();
   const proc = tool.run('/bin/main', ['cat'], { stdin });
   const result = expect(proc).outputs({ stdout: 'CS198! bytes' });
-  expect(proc.stdin.closed).toBe(false);
+  expect(stdin.closed).toBe(false);
   await proc.stdin.write('CS198!');
   await proc.stdin.write(new TextEncoder().encode(' bytes'));
   proc.stdin.close();
-  expect(proc.stdin.closed).toBe(true);
+  expect(stdin.closed).toBe(true);
   await result;
 });
 

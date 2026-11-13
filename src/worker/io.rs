@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use wasm_bindgen::{JsCast, JsValue};
 use wasmer_wasix::virtual_fs::{
     AsyncRead, AsyncSeek, AsyncWrite, FsError, ReadBuf, Result, VirtualFile,
@@ -22,9 +22,18 @@ pub struct Device {
     buffer: js_sys::SharedArrayBuffer,
     /// Whether `buffer` backs a [`PipeDevice`] (rather than a [`SharedBufferDevice`]).
     pipe: bool,
-    /// For a [`DuplexDevice`], the buffer of the pipe it reads (writing to `buffer`).
-    #[serde(default, with = "serde_wasm_bindgen::preserve")]
-    input: JsValue,
+    /// For a [`DuplexDevice`], the buffer of the pipe the main thread writes to (which the
+    /// device reads, writing to `buffer`).
+    #[serde(default, deserialize_with = "optional")]
+    write: Option<js_sys::SharedArrayBuffer>,
+}
+
+/// Like `serde_wasm_bindgen::preserve`, for an optional value.
+fn optional<'de, D: Deserializer<'de>>(
+    de: D,
+) -> std::result::Result<Option<js_sys::SharedArrayBuffer>, D::Error> {
+    let value: JsValue = serde_wasm_bindgen::preserve::deserialize(de)?;
+    Ok(value.dyn_into().ok())
 }
 
 // SAFETY: workers are single-threaded, and the buffer is only accessed through atomics or
@@ -34,10 +43,10 @@ unsafe impl Sync for Device {}
 
 impl Device {
     pub fn open(&self) -> Box<dyn VirtualFile + Send + Sync> {
-        match (self.pipe, self.input.dyn_ref()) {
-            (true, Some(input)) => Box::new(DuplexDevice {
-                input: PipeDevice::new(input, None),
-                output: PipeDevice::new(&self.buffer, None),
+        match (self.pipe, &self.write) {
+            (true, Some(write)) => Box::new(DuplexDevice {
+                read: PipeDevice::new(write, None),
+                write: PipeDevice::new(&self.buffer, None),
             }),
             (true, None) => Box::new(PipeDevice::new(&self.buffer, None)),
             (false, _) => Box::new(SharedBufferDevice::new(&self.buffer)),
@@ -241,27 +250,27 @@ impl VirtualFile for PipeDevice {
 // │ DuplexDevice                                                             │
 // ╰──────────────────────────────────────────────────────────────────────────╯
 
-/// A pair of pipes (see `Duplex` in `src/ts/process.ts`): reads come from `input`, and
-/// writes go to `output`. Everything else is inherited from the pipe in that direction.
+/// A pair of pipes (see `Duplex` in `src/ts/process.ts`): reads come from `read`, and
+/// writes go to `write`. Everything else is inherited from the pipe in that direction.
 #[derive(Debug)]
 pub struct DuplexDevice {
-    input: PipeDevice,
-    output: PipeDevice,
+    read: PipeDevice,
+    write: PipeDevice,
 }
 
 impl Read for DuplexDevice {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.input.read(buf)
+        self.read.read(buf)
     }
 }
 
 impl Write for DuplexDevice {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.output.write(buf)
+        self.write.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.output.flush()
+        self.write.flush()
     }
 }
 
@@ -269,41 +278,41 @@ blocking_io!(DuplexDevice);
 
 impl AsyncSeek for DuplexDevice {
     fn start_seek(self: Pin<&mut Self>, position: io::SeekFrom) -> io::Result<()> {
-        Pin::new(&mut self.get_mut().input).start_seek(position)
+        Pin::new(&mut self.get_mut().read).start_seek(position)
     }
 
     fn poll_complete(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<u64>> {
-        Pin::new(&mut self.get_mut().input).poll_complete(cx)
+        Pin::new(&mut self.get_mut().read).poll_complete(cx)
     }
 }
 
 impl VirtualFile for DuplexDevice {
     fn last_accessed(&self) -> u64 {
-        self.input.last_accessed()
+        self.read.last_accessed()
     }
     fn last_modified(&self) -> u64 {
-        self.input.last_modified()
+        self.read.last_modified()
     }
     fn created_time(&self) -> u64 {
-        self.input.created_time()
+        self.read.created_time()
     }
     fn size(&self) -> u64 {
-        self.input.size()
+        self.read.size()
     }
     fn set_len(&mut self, new_size: u64) -> Result<()> {
-        self.input.set_len(new_size)
+        self.read.set_len(new_size)
     }
     fn unlink(&mut self) -> Result<()> {
-        self.input.unlink()
+        self.read.unlink()
     }
     fn get_special_fd(&self) -> Option<u32> {
-        self.input.get_special_fd()
+        self.read.get_special_fd()
     }
     fn poll_read_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.get_mut().input).poll_read_ready(cx)
+        Pin::new(&mut self.get_mut().read).poll_read_ready(cx)
     }
     fn poll_write_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.get_mut().output).poll_write_ready(cx)
+        Pin::new(&mut self.get_mut().write).poll_write_ready(cx)
     }
 }
 
