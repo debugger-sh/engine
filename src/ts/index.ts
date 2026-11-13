@@ -383,7 +383,7 @@ export class Engine {
       worker.worker.addEventListener('error', onError);
       worker.worker.postMessage({ type: 'run', job });
     });
-    // The Python debugger's pipes belong to this job.
+    // The Python debugger's duplex belongs to this job.
     return exited.finally(() => Object.values(python ?? {}).forEach((pipe) => pipe.close()));
   }
 }
