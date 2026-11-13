@@ -335,7 +335,9 @@ export class Engine {
     const python = debug === 'python' ? process.debugger?.[Internals].python() : undefined;
     const devices = Object.entries({ ...options.devices, ...python }).map(([path, device]) => {
       const pipe = device instanceof Pipe;
-      return { path: join(path), buffer: pipe ? device[Internals].buffer : device, pipe };
+      const buffer = pipe ? device[Internals].buffer : device;
+      const input = pipe ? device[Internals].input?.[Internals].buffer : undefined;
+      return { path: join(path), buffer, pipe, input };
     });
     const job = {
       name,
@@ -407,7 +409,7 @@ export type {
 export type { Filesystem } from './fs';
 export type { Device, PipeOptions, ProcessResult, Readable, Writable } from './process';
 export type { Process } from './process';
-export { Pipe } from './process';
+export { Duplex, Pipe } from './process';
 export type {
   RunOptions,
   CppOptions,

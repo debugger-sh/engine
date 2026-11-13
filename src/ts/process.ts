@@ -308,6 +308,8 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
   readonly [Internals]: {
     buffer: SharedArrayBuffer;
     close: boolean;
+    /** For a {@link Duplex}, the pipe processes read from (writing to `buffer`). */
+    input?: Pipe;
     /** Resolves once a flowing pipe has ended (immediately, for a paused one). */
     drained(): Promise<void>;
   };
@@ -447,6 +449,35 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
   #notify() {
     Atomics.add(this.#header, SEQUENCE, 1);
     Atomics.notify(this.#header, SEQUENCE);
+  }
+}
+
+/**
+ * A pair of pipes for two-way communication with a process through a single device.
+ *
+ * Writes go to one pipe, which processes read from, and reads come from the other,
+ * which processes write to. Closing a duplex closes both.
+ *
+ * ```ts
+ * const dup = new Duplex();
+ * const proc = engine.run("python", { devices: { "/dev/host": dup } });
+ * await dup.write("ping\n");
+ * console.log(await dup.read());
+ * ```
+ */
+export class Duplex extends Pipe {
+  constructor(options: PipeOptions = {}) {
+    super(options);
+    this[Internals].input = new Pipe(options);
+  }
+
+  public override write(value: Uint8Array | string): Promise<void> {
+    return this[Internals].input!.write(value);
+  }
+
+  public override close(): void {
+    this[Internals].input?.close(); // absent while `super` closes a pipe without capacity
+    super.close();
   }
 }
 
