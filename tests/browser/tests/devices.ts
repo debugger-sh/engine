@@ -1,4 +1,4 @@
-import { Pipe } from 'debugger-sh';
+import { Duplex, Pipe } from 'debugger-sh';
 import { expect, test } from 'vitest';
 
 import { eng, HELLO, withTool } from '../helpers';
@@ -108,4 +108,24 @@ test('python programs read devices', async () => {
   const engine = await eng({ 'main.py': 'print(open("/dev/in").read()[::-1])' });
   const devices = { '/dev/in': buffer('python') };
   await expect(engine.run('python', { devices })).outputs({ stdout: 'nohtyp\n' });
+});
+
+test('processes read from duplexes', async () => {
+  const tool = await withTool();
+  const dup = new Duplex();
+  const proc = tool.run('/bin/main', ['read', '/dev/test'], { devices: { '/dev/test': dup } });
+  const result = expect(proc).outputs({ stdout: 'from host' });
+  await dup.write('from host');
+  dup.close();
+  await result;
+});
+
+test('processes write to duplexes', async () => {
+  const tool = await withTool();
+  const dup = new Duplex();
+  await dup.write('unread');
+  await tool.run('/bin/main', ['write', '/dev/test', 'from guest'], {
+    devices: { '/dev/test': dup }
+  });
+  expect(decode(await dup.read())).toBe('from guest');
 });

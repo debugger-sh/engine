@@ -2,7 +2,7 @@ import init, { Fs, type InitOutput } from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
 import { Filesystem } from './fs';
-import { Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
+import { Duplex, Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
 import {
   commands,
   type Context,
@@ -201,9 +201,9 @@ export class Engine {
       stderr: options.stderr ?? flowing()
     };
     // Pipes given to the process (including its own) are closed once it exits.
-    const pipes = [...Object.values(stdio), ...Object.values(options.devices ?? {})].filter(
-      (device): device is Pipe => device instanceof Pipe && device[Internals].close
-    );
+    const pipes = [...Object.values(stdio), ...Object.values(options.devices ?? {})]
+      .flatMap((device) => (device instanceof Duplex ? [device.to, device.from] : [device]))
+      .filter((device): device is Pipe => device instanceof Pipe && device[Internals].close);
     const debug = options.debug ? new Debugger(Internals) : undefined;
     const process = this.#spawn(stdio, debug, command, args, options, pipes);
 
@@ -334,8 +334,10 @@ export class Engine {
     const { stdin, stdout, stderr } = process[Internals].stdio;
     const python = debug === 'python' ? process.debugger?.[Internals].python() : undefined;
     const devices = Object.entries({ ...options.devices, ...python }).map(([path, device]) => {
-      const pipe = device instanceof Pipe;
-      return { path: join(path), buffer: pipe ? device[Internals].buffer : device, pipe };
+      const [from, to] = device instanceof Duplex ? [device.from, device.to] : [device];
+      const pipe = from instanceof Pipe;
+      const buffer = pipe ? from[Internals].buffer : from;
+      return { path: join(path), buffer, pipe, write: to?.[Internals].buffer };
     });
     const job = {
       name,
@@ -380,7 +382,7 @@ export class Engine {
       worker.worker.addEventListener('error', onError);
       worker.worker.postMessage({ type: 'run', job });
     });
-    // The Python debugger's pipes belong to this job.
+    // The Python debugger's duplex belongs to this job.
     return exited.finally(() => Object.values(python ?? {}).forEach((pipe) => pipe.close()));
   }
 }
@@ -407,7 +409,7 @@ export type {
 export type { Filesystem } from './fs';
 export type { Device, PipeOptions, ProcessResult, Readable, Writable } from './process';
 export type { Process } from './process';
-export { Pipe } from './process';
+export { Duplex, Pipe } from './process';
 export type {
   RunOptions,
   CppOptions,

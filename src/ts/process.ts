@@ -264,7 +264,7 @@ export interface PipeOptions {
  * Represents a "device" that a process can interface with via the filesystem
  * to allow communicating with the outside environment or other processes.
  */
-export type Device = Pipe | SharedArrayBuffer;
+export type Device = Pipe | Duplex | SharedArrayBuffer;
 
 const HEADER = 16;
 const [READ, WRITE, SEQUENCE, CLOSED] = [0, 1, 2, 3];
@@ -447,6 +447,59 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
   #notify() {
     Atomics.add(this.#header, SEQUENCE, 1);
     Atomics.notify(this.#header, SEQUENCE);
+  }
+}
+
+/**
+ * A pair of pipes for two-way communication with a process through a single device.
+ *
+ * Writes go to the {@link Duplex.to} pipe, which processes read from, and reads come from
+ * the {@link Duplex.from} pipe, which processes write to. Closing a duplex closes both.
+ *
+ * ```ts
+ * const dup = new Duplex();
+ * const proc = engine.run("python", { devices: { "/dev/host": dup } });
+ * await dup.write("ping\n");
+ * console.log(await dup.read());
+ * ```
+ */
+export class Duplex extends EventEmitter<ReadableEventsMap> implements Readable, Writable {
+  /** The pipe written to processes. */
+  public readonly to: Pipe;
+  /** The pipe read from processes. */
+  public readonly from: Pipe;
+
+  constructor(options: PipeOptions = {}) {
+    super();
+    [this.to, this.from] = [new Pipe(options), new Pipe(options)];
+    this.from.on('data', (chunk) => this.emit('data', chunk));
+    this.from.on('text', (text) => this.emit('text', text));
+    this.from.on('end', () => this.emit('end'));
+  }
+
+  public get closed(): boolean {
+    return this.from.closed;
+  }
+
+  public write(value: Uint8Array | string): Promise<void> {
+    return this.to.write(value);
+  }
+
+  public close(): void {
+    this.to.close();
+    this.from.close();
+  }
+
+  public read(): Promise<Uint8Array> {
+    return this.from.read();
+  }
+
+  public [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+    return this.from[Symbol.asyncIterator]();
+  }
+
+  public lines(): AsyncIterable<string> {
+    return this.from.lines();
   }
 }
 

@@ -135,3 +135,23 @@ impl<T> WeakRef<T> {
         Some(unsafe { &**ptr })
     }
 }
+
+/// Like `serde_wasm_bindgen::preserve`, for optional values (where `undefined` and `null`
+/// are `None`).
+pub mod preserve_option {
+    use serde::{Deserialize, Deserializer};
+    use wasm_bindgen::JsCast;
+
+    /// A value deserialized by `serde_wasm_bindgen::preserve`.
+    struct Preserved<T>(T);
+
+    impl<'de, T: JsCast> Deserialize<'de> for Preserved<T> {
+        fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+            serde_wasm_bindgen::preserve::deserialize(de).map(Preserved)
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>, T: JsCast>(de: D) -> Result<Option<T>, D::Error> {
+        Ok(Option::deserialize(de)?.map(|Preserved(value)| value))
+    }
+}

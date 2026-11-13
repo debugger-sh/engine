@@ -2,7 +2,7 @@ import type { DebugProtocol } from '@vscode/debugprotocol';
 import EventEmitter from 'events';
 
 import { DapAdapter } from '../../pkg/engine';
-import { Pipe, type WorkerMessage } from './process';
+import { Duplex, type WorkerMessage } from './process';
 import { internal, Internals, join } from './util';
 
 type DebuggerProtocolEvents = {
@@ -22,10 +22,11 @@ export class DebuggerProtocol extends EventEmitter<DebuggerProtocolEvents> {
     /** Receives a message from the worker running the debuggee. */
     receive(message: WorkerMessage): void;
     /**
-     * Creates the devices through which the Python bridge (`bridge.py`) talks to this
-     * debugger: pipes of commands and of pauses, each carrying one JSON message per line.
+     * Creates the device through which the Python bridge (`bridge.py`) talks to this
+     * debugger: a duplex carrying one JSON message per line, commands to the bridge and
+     * pauses from it.
      */
-    python(): Record<string, Pipe>;
+    python(): Record<string, Duplex>;
   };
 
   readonly #adapter = new DapAdapter();
@@ -38,17 +39,16 @@ export class DebuggerProtocol extends EventEmitter<DebuggerProtocolEvents> {
     this[Internals] = {
       receive: (message) => this.#adapter.receive(message),
       python: () => {
-        const [commands, pauses] = [new Pipe(), new Pipe()];
+        const bridge = new Duplex();
         // Commands are written in turn, each waiting (in chunks) for the bridge to read it.
         let sent = Promise.resolve();
-        const send = (line: string) =>
-          (sent = sent.then(() => commands.write(line)).catch(() => {}));
+        const send = (line: string) => (sent = sent.then(() => bridge.write(line)).catch(() => {}));
         this.#adapter.receive({ type: 'python_debug', send });
         void (async () => {
-          for await (const frame of pauses.lines())
+          for await (const frame of bridge.lines())
             this.#adapter.receive({ type: 'paused', frame });
         })();
-        return { '/__debug__/commands': commands, '/__debug__/pauses': pauses };
+        return { '/__debug__': bridge };
       }
     };
   }
