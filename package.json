@@ -64,5 +64,8 @@
     "vite": "^7.3.1",
     "vite-plugin-dts": "^4.5.4",
     "vitest": "5.1.0"
+  },
+  "dependencies": {
+    "@vscode/debugprotocol": "^1.68.0"
   }
 }
