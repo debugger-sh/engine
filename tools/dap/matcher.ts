@@ -1,7 +1,7 @@
 export type Json = null | boolean | number | string | JsonArray | JsonObject;
 export type JsonArray = Json[];
 export type JsonObject = { [k: string]: Json };
-export type CaptureMap = Record<string, Json>;
+export type CaptureMap = Record<string, unknown>;
 
 const HANDLEBARS_RE = /^\{\{([\s\S]+)\}\}$/;
 const CAPTURE_RE = /^\$\{\{([\s\S]+)\}\}$/;
@@ -34,7 +34,7 @@ export type MatchResult =
       reason: string;
     };
 
-export function match(expected: Json, actual: Json, at = ''): MatchResult {
+export function match(expected: Json, actual: unknown, at = ''): MatchResult {
   const succeed = (captures: CaptureMap = {}): MatchResult => ({ success: true, captures });
   const fail = (reason: string): MatchResult => ({ success: false, at, reason });
 
@@ -48,7 +48,7 @@ export function match(expected: Json, actual: Json, at = ''): MatchResult {
     return allOf(expected.map((e, i) => match(e, actual[i], `${at}[${i}]`)));
   }
 
-  function tryCompareSpecial(expected: JsonObject, actual: Json): MatchResult | null {
+  function tryCompareSpecial(expected: JsonObject, actual: unknown): MatchResult | null {
     const contains = expected['$array.contains'];
     if (contains) {
       if (!Array.isArray(contains)) return fail('array.contains requires array value');
@@ -103,7 +103,9 @@ export function match(expected: Json, actual: Json, at = ''): MatchResult {
     if (typeof actual !== 'object' || actual === null)
       return fail(`expected object, got ${tn(actual)}`);
     return allOf(
-      Object.keys(expected).map((key) => match(expected[key], actual[key], `${at}.${key}`))
+      Object.keys(expected).map((key) =>
+        match(expected[key], Reflect.get(actual, key), `${at}.${key}`)
+      )
     );
   }
 
@@ -120,7 +122,7 @@ function getCaptureName(value: Json): string | null {
   return IDENTIFIER_RE.test(expression) ? expression : null;
 }
 
-function tn(value: Json) {
+function tn(value: unknown) {
   if (Array.isArray(value)) return 'array';
   if (value === null) return 'null';
   return typeof value;

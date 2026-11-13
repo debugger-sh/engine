@@ -1,3 +1,4 @@
+import type { DebugProtocol } from '@vscode/debugprotocol';
 import { $ } from 'bun';
 import chalk from 'chalk';
 import { existsSync } from 'node:fs';
@@ -6,7 +7,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-import type { Backend, BackendOptions, Json } from '../run';
+import type { Backend, BackendOptions } from '../run';
+
+/** A message from the adapter: a response, an event or a (reverse) request. */
+type Message = DebugProtocol.Request | DebugProtocol.Response | DebugProtocol.Event;
 
 const SOURCE_EXTENSIONS = new Set(['c', 'cc', 'cp', 'cpp', 'cxx', 'c++']);
 
@@ -21,22 +25,23 @@ export async function createLldbBackend(opts: BackendOptions): Promise<Backend> 
     stderr: 'pipe'
   });
 
-  const eventListeners: ((e: Json) => void)[] = [];
-  const pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void }>();
+  const eventListeners: ((e: DebugProtocol.Event) => void)[] = [];
+  const pending = new Map<
+    number,
+    { resolve: (v: DebugProtocol.Response) => void; reject: (e: Error) => void }
+  >();
 
-  const dispatch = (msg: Json) => {
-    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
-    const m = msg as { type?: string; request_seq?: number; event?: string; body?: Json };
-    if (m.type === 'response' && typeof m.request_seq === 'number') {
-      const p = pending.get(m.request_seq);
+  const dispatch = (msg: Message) => {
+    if ('request_seq' in msg) {
+      const p = pending.get(msg.request_seq);
       if (p) {
-        pending.delete(m.request_seq);
+        pending.delete(msg.request_seq);
         p.resolve(msg);
       }
       return;
     }
-    if (m.type === 'event') {
-      handleOutputEvent(m);
+    if ('event' in msg) {
+      handleOutputEvent(msg);
       for (const cb of eventListeners) cb(msg);
     }
   };
@@ -49,28 +54,20 @@ export async function createLldbBackend(opts: BackendOptions): Promise<Backend> 
 
   void drainStderr(proc.stderr);
 
-  function send(req: Json): Promise<Json> {
-    if (!req || typeof req !== 'object' || Array.isArray(req)) {
-      return Promise.reject(new Error('lldb backend send: not an object'));
-    }
-    const msg = req as { seq?: number; type?: string; command?: string; arguments?: Json };
-    if (msg.type === 'request' && msg.command === 'launch') {
-      msg.arguments = {
+  function send(request: DebugProtocol.Request): Promise<DebugProtocol.Response> {
+    if (request.command === 'launch') {
+      request.arguments = {
         program: progAbs,
         cwd: path.dirname(progAbs),
         stopOnEntry: false
       };
     }
-    const seq = msg.seq;
-    if (typeof seq !== 'number') {
-      return Promise.reject(new Error('lldb backend send: missing seq'));
-    }
-    return new Promise<Json>((resolve, reject) => {
-      pending.set(seq, { resolve, reject });
+    return new Promise((resolve, reject) => {
+      pending.set(request.seq, { resolve, reject });
       try {
-        writeFrame(proc.stdin, req);
+        writeFrame(proc.stdin, request);
       } catch (err) {
-        pending.delete(seq);
+        pending.delete(request.seq);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
@@ -89,7 +86,7 @@ export async function createLldbBackend(opts: BackendOptions): Promise<Backend> 
             seq: 0xffff_ffff,
             command: 'disconnect',
             arguments: { terminateDebuggee: true }
-          } as Json),
+          }),
           new Promise((resolve) => setTimeout(resolve, 250))
         ]);
       } catch {
@@ -165,7 +162,10 @@ async function compileTest(testDir: string): Promise<{ progAbs: string }> {
   return { progAbs };
 }
 
-function writeFrame(stdin: { write(data: string): unknown; flush(): unknown }, msg: Json) {
+function writeFrame(
+  stdin: { write(data: string): unknown; flush(): unknown },
+  msg: DebugProtocol.ProtocolMessage
+) {
   const body = JSON.stringify(msg);
   const header = `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n`;
   stdin.write(header);
@@ -173,7 +173,7 @@ function writeFrame(stdin: { write(data: string): unknown; flush(): unknown }, m
   stdin.flush();
 }
 
-async function readLoop(stdout: ReadableStream<Uint8Array>, dispatch: (msg: Json) => void) {
+async function readLoop(stdout: ReadableStream<Uint8Array>, dispatch: (msg: Message) => void) {
   const reader = stdout.getReader();
   const decoder = new TextDecoder();
   let buffer = new Uint8Array(0);
@@ -198,9 +198,9 @@ async function readLoop(stdout: ReadableStream<Uint8Array>, dispatch: (msg: Json
       if (buffer.length < start + length) break;
       const body = decoder.decode(buffer.slice(start, start + length));
       buffer = buffer.slice(start + length);
-      let msg: Json;
+      let msg: Message;
       try {
-        msg = JSON.parse(body) as Json;
+        msg = JSON.parse(body);
       } catch (err) {
         throw new Error(`invalid DAP body: ${String(err)}\n${body}`);
       }
@@ -221,13 +221,8 @@ async function drainStderr(stderr: ReadableStream<Uint8Array>) {
   }
 }
 
-function handleOutputEvent(msg: { event?: string; body?: Json }) {
-  if (msg.event !== 'output') return;
-  const body = msg.body;
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return;
-  const out = (body as Record<string, Json>).output;
-  if (typeof out !== 'string') return;
-  process.stdout.write(chalk.gray(out));
+function handleOutputEvent({ event, body }: DebugProtocol.Event) {
+  if (event === 'output') process.stdout.write(chalk.gray(body.output));
 }
 
 function concatU8(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {

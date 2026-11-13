@@ -204,6 +204,17 @@ impl Debugger {
         Some(loc)
     }
 
+    /// Clears every breakpoint set in `file`.
+    pub fn clear_breakpoints(&self, file: &str) {
+        let flags = self.info.get_bp_flags();
+        let target = std::path::Path::new("/").join(file);
+        for (index, location) in self.info.locations.iter().enumerate() {
+            if *self.info.dwarf.file_at(location.file_index) == target {
+                flags.set_index(index as u32, 0);
+            }
+        }
+    }
+
     /// Walks the debug stack to find the offset of the Nth stack frame
     fn frame_offset_at(&self, frame_id: u32) -> Option<u32> {
         let (view, sp, stack_top) = self.stack_view();

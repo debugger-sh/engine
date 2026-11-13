@@ -15,21 +15,22 @@ The package ships a WebAssembly binary and TypeScript bindings. Initialize it on
 ```ts
 import { Engine } from 'debugger-sh';
 
-const engine = await Engine.create('c'); // or 'python'
+const engine = await Engine.create();
 ```
 
 ---
 
 ## Running Code
 
-Set the virtual filesystem, then call `run()`. The program sees `/main.c` as its source file.
+Populate the shared filesystem, then run a toolchain (`cpp`, `rust` or `python`). Each call to `run()` returns a new, already running process; await it for its `{ exitCode, killed }`.
 
 ```ts
-engine.fs = {
-  'main.c': `#include <iostream>\nint main() { std::cout << "hello\\n"; }`
-};
+await engine.fs.mount({
+  'main.cpp': `#include <iostream>\nint main() { std::cout << "hello\\n"; }`
+});
 
-await engine.run();
+const proc = engine.run('cpp');
+await proc;
 ```
 
 **stdout / stderr** use a small event-style API: subscribe with `on('data', …)` and unsubscribe with `off` using the same listener function. Each chunk is a `Uint8Array` of UTF-8 bytes.
@@ -39,35 +40,67 @@ const decoder = new TextDecoder();
 const onOut = (chunk: Uint8Array) => {
   console.log(decoder.decode(chunk));
 };
-engine.stdout.on('data', onOut);
-engine.stderr.on('data', onOut);
+proc.stdout.on('data', onOut);
+proc.stderr.on('data', onOut);
 
-// When tearing down (optional if the engine is discarded):
-engine.stdout.off('data', onOut);
-engine.stderr.off('data', onOut);
+// When tearing down (optional if the process is discarded):
+proc.stdout.off('data', onOut);
+proc.stderr.off('data', onOut);
 ```
 
-**stdin** exposes `write(value: string | Uint8Array)` (UTF-8 for strings):
+**stdin** is closed by default, so programs read end-of-file. For interactive input, create a pipe and pass it to `run`. It exposes `write(value: string | Uint8Array)` (UTF-8 for strings), and `close()` to signal end-of-file:
 
 ```ts
-await engine.stdin.write('hello\n');
-await engine.stdin.write(new TextEncoder().encode('hello\n'));
+const stdin = new Pipe();
+const proc = engine.run('cpp', { stdin });
+await stdin.write('hello\n');
+await stdin.write(new TextEncoder().encode('hello\n'));
+stdin.close();
 ```
 
-To stop a running program:
+As a shorthand, `{ stdin: true }` creates a new open pipe, written via `proc.stdin`:
 
 ```ts
-engine.stop();
+const proc = engine.run('cpp', { stdin: true });
+await proc.stdin.write('hello\n');
+proc.stdin.close();
+```
+
+Or pass a string / `Uint8Array` to preload stdin and close it immediately:
+
+```ts
+await engine.run('cpp', { stdin: 'hello\n' });
+```
+
+To stop a running program (it resolves with `{ exitCode: 137, killed: true }`):
+
+```ts
+proc.kill();
 ```
 
 ---
 
 ## Debugger (DAP)
 
-The debugger exposes a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) interface. Requests are sent synchronously and return a response. DAP messages (events, and optionally routed responses) are emitted asynchronously through the `event` listener.
+Each process started with `debug: true` has its own debugger, which debugs the user program (not the compiler or linker steps). The program starts once the debugger first continues (or steps):
 
 ```ts
-const dbg = engine.debugger;
+const proc = engine.run('cpp', { debug: true });
+const dbg = proc.debugger;
+
+await dbg.setBreakpoints('main.cpp', [{ line: 5 }]);
+
+// Resolves with the next stop (as do stepIn, stepOver and stepOut), or null once the program exits
+for (let stop = await dbg.continue(); stop; stop = await dbg.continue()) {
+  const [frame] = stop.frames(); // queried on each call, and valid until the program resumes
+  for (const { name, value } of frame.locals().vars()) console.log(`${name} = ${value}`);
+}
+```
+
+This is a thin wrapper around a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) interface, which is also available directly through `proc.debugger.dap`. Requests are sent synchronously and return a response. DAP messages (events, and optionally routed responses) are emitted asynchronously through the `event` listener.
+
+```ts
+const dbg = proc.debugger.dap;
 
 dbg.on('event', (msg) => {
   // receives both events (type: 'event') and — if you choose to route them here — responses
@@ -80,8 +113,8 @@ dbg.on('event', (msg) => {
 Order matches the DAP test harness (`tools/dap/run.ts` + `tools/dap/backends/engine.ts`):
 
 1. **Client** registers `dbg.on('event', …)` for `initialized`, `stopped`, and `terminated`.
-2. **Client** starts **`engine.run()`** without awaiting it yet — the worker compiles (C) or boots the debug bridge (Python) and then **blocks** until step **9**.
-3. **Client →** `initialize` request (can be sent while `run()` is in flight).
+2. **Client** starts the process with **`engine.run(…, { debug: true })`** without awaiting it yet — the worker compiles (C) or boots the debug bridge (Python) and then **blocks** until step **9**.
+3. **Client →** `initialize` request (can be sent while the process is in flight).
 4. **Adapter →** `initialize` response (body includes **Capabilities**, e.g. `supportsConfigurationDoneRequest`).
 5. **Adapter** builds the internal debugger when the worker sends its `debug` / `python_debug` message (instrumented binary or Python SAB ready).
 6. **Adapter →** `initialized` event — emitted only after steps **4** and **5** (client has initialized **and** a debugger backend is attached).
@@ -90,7 +123,7 @@ Order matches the DAP test harness (`tools/dap/run.ts` + `tools/dap/backends/eng
 9. **Client →** `configurationDone`
 10. **Adapter →** `configurationDone` response — the debuggee then leaves its initial wait and **starts running**.
 
-Until step **9** succeeds, `configurationDone` returns an error (`debugger not ready`). The worker is blocked on the main thread, so you must complete the handshake while `run()` is still pending — typically by running `run()` and the handshake **in parallel**.
+Until step **9** succeeds, `configurationDone` returns an error (`debugger not ready`). The worker is blocked on the main thread, so you must complete the handshake while the process is still pending — typically by running `run()` and the handshake **in parallel**.
 
 Do **not** rely on the `initialized` event alone: also retry steps **7–9** until `configurationDone` returns `success: true` (the IDE and test harness both poll). The event is a useful early signal, but the worker may attach slightly before or after the event is delivered to your listener.
 
@@ -133,8 +166,6 @@ dbg.on('event', (msg: { type: string; event?: string }) => {
   if (msg.type === 'event' && msg.event === 'initialized') completeHandshake();
 });
 
-const runPromise = engine.run();
-
 dbg.send({ type: 'request', seq: seq++, command: 'initialize', arguments: {} });
 
 while (!handshakeDone) {
@@ -142,7 +173,7 @@ while (!handshakeDone) {
   await new Promise((r) => setTimeout(r, 50));
 }
 
-await runPromise;
+await proc;
 ```
 
 ### Handling a pause (`stopped`)
@@ -244,27 +275,9 @@ After each successful stop, the worker resets mode to **normal** and updates **`
 
 When building a student-facing IDE, you usually want to hide debugger/runtime noise from `stackTrace` and `scopes` responses. The engine applies **Python-only** filters; C/C++ stacks come from DWARF and are not filtered the same way.
 
-#### Stack frames — `debugger.filterInternals`
+#### Stack frames
 
-Set **before** `run()`:
-
-```ts
-engine.debugger.filterInternals = true; // recommended for student UIs
-```
-
-| `filterInternals` | `stackTrace` behaviour                                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `false` (default) | All frames are returned. Internal frames use `presentationHint: "subtle"`; user code uses `"normal"`. Clients can hide or dim subtle frames themselves. |
-| `true`            | Frames where `user` is `false` are omitted from the response.                                                                                           |
-
-A frame is **`user: true`** when its source path is `/main.py` (the student's virtual file). Everything else — the Bdb bridge (`/_bridge.py`), stdlib, etc. — is internal.
-
-Internal frames always carry `presentationHint: "subtle"` even when `filterInternals` is `false`, so you can implement a “show internals” toggle without re-querying the worker:
-
-```ts
-const frames = res.body?.stackFrames ?? [];
-const studentFrames = frames.filter((f) => f.presentationHint !== 'subtle');
-```
+Frames belonging to the debugger itself (`bdb` and the bridge) are always omitted from `stackTrace`. Every frame of the running program is kept, including imported modules and the stdlib.
 
 #### Frame names
 
@@ -296,7 +309,7 @@ EXPAND responses must fit in the debug **SAB** (4084 bytes). The bridge returns 
 
 #### C / C++
 
-No `filterInternals` equivalent. `stackTrace` reflects the DWARF backtrace for instrumented user code. Variable formatting follows DWARF type info (see `tools/dap/tests/formatting/`).
+`stackTrace` reflects the DWARF backtrace for instrumented user code. Variable formatting follows DWARF type info (see `tools/dap/tests/formatting/`).
 
 ### Program End
 

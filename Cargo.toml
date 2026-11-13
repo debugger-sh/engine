@@ -32,12 +32,11 @@ wasmer-wasix = { version = "0.601.0", default-features = false, features = [
     "js",
     "js-default"
 ] }
-web-sys = { version = '0.3.83', features = ['DedicatedWorkerGlobalScope', 'EventTarget', 'MessageEvent', 'Worker', 'console'] } 
+web-sys = { version = '0.3.83', features = ['DedicatedWorkerGlobalScope', 'console'] }
 futures = "0.3.31"
 console_error_panic_hook = "0.1.7"
 async-trait = "0.1.89"
 wasmer-config = "0.601.0"
-instant = { version = "0.1", features = ["wasm-bindgen"] }
 serde_repr = "0.1.20"
 anyhow = "1.0"
 gimli = { git = "https://github.com/gimli-rs/gimli" }
@@ -46,3 +45,11 @@ wasmparser = "0.245"
 serde_json = "1.0.149"
 regex = "1.12.3"
 derive_more = { version = "2", features = ["display"] }
+crc32fast = "1.5"
+globset = "0.4"
+# Compile out all logging: it is unused, and its global state is not worker-safe.
+tracing = { version = "0.1", features = ["max_level_off", "release_max_level_off"] }
+zip = { version = "2.6", default-features = false, features = ["deflate"] }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O", "--enable-threads", "--enable-bulk-memory", "--enable-mutable-globals"]

@@ -1,7 +1,0 @@
-.build*/
-.pw-cache/
-node_modules/
-package-lock.json
-*.o
-*.wasm
-*.bench.bin

@@ -10,16 +10,13 @@ use crate::python::debug::Debugger;
 /// DAP backend for Python (Bdb bridge over a shared memory buffer).
 pub struct PythonBackend {
     debugger: Debugger,
-    /// When true, internal frames (bdb, bridge) are omitted from `stackTrace` responses.
-    /// Internal frames are always tagged with `presentationHint: "subtle"` regardless.
-    filter_internals: bool,
     /// Variable handles for the current stop (rebuilt each pause).
     vars: PythonVars,
 }
 
 impl PythonBackend {
-    pub fn new(debugger: Debugger, filter_internals: bool) -> Self {
-        Self { debugger, filter_internals, vars: PythonVars::default() }
+    pub fn new(debugger: Debugger) -> Self {
+        Self { debugger, vars: PythonVars::default() }
     }
 }
 
@@ -43,15 +40,13 @@ impl DapDebugger for PythonBackend {
         let stack_frames: Vec<_> = frames
             .iter()
             .enumerate()
-            .filter(|(_, f)| !self.filter_internals || f.user)
             .map(|(i, f)| {
                 json!({
                     "id": i as i64,
                     "name": f.function,
                     "line": f.line,
                     "column": 0,
-                    "source": { "path": f.file },
-                    "presentationHint": if f.user { "normal" } else { "subtle" }
+                    "source": { "path": f.file }
                 })
             })
             .collect();

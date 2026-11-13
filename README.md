@@ -1,6 +1,8 @@
-# debugger-sh
+<p align="center">
+  <img alt="debugger-sh" src="docs/logo.png" width="280" />
+</p>
 
-A browser-based execution engine powered by WebAssembly. Compile and run C/C++ and Python programs entirely in the browser with a built-in debugger.
+A browser-based execution engine powered by WebAssembly. Compile, run, and debug C/C++, Rust and Python programs entirely in the browser.
 
 ## Installation
 
@@ -8,7 +10,7 @@ A browser-based execution engine powered by WebAssembly. Compile and run C/C++ a
 npm install debugger-sh
 ```
 
-> **Requires** these response headers (the engine uses `SharedArrayBuffer` for stdin):
+> To use this library, these response headers must be enabled in your server [[learn more]](https://web.dev/articles/why-coop-coep):
 >
 > ```
 > Cross-Origin-Embedder-Policy: require-corp
@@ -17,97 +19,187 @@ npm install debugger-sh
 
 ---
 
-## Quick start
+## Quickstart
 
 ```ts
 import { Engine } from 'debugger-sh';
 
-const engine = await Engine.create('c');
+/* Create the engine with some files */
+const engine = await Engine.create({
+  fs: {
+    'main.cpp': `
+      #include <iostream>
+      int main() { std::cout << "Hello, world!" << std::endl; }`
+  }
+});
 
-// Virtual filesystem — the program sees these as real files
-engine.fs = {
-  'main.cpp': `
-    #include <iostream>
-    int main() {
-      std::cout << "Hello, world!" << std::endl;
-      return 0;
-    }
-  `
-};
+/* Compile and run C++ programs */
+const proc = engine.run('cpp');
+proc.stdout.on('text', (output) => console.log(output));
+console.log(await proc); // { exitCode: 0, killed: false }
 
-// stdout / stderr chunks arrive as Uint8Array (UTF-8)
-const decoder = new TextDecoder();
-const print = (chunk: Uint8Array) => process.stdout.write(decoder.decode(chunk));
-engine.stdout.on('data', print);
-engine.stderr.on('data', print);
-
-await engine.run();
+/* Dipose of the engine's resources when you're done */
+engine.dispose();
 ```
 
-> Programs compile in **debug mode** by default, so a [DAP](https://microsoft.github.io/debug-adapter-protocol/) handshake is required before `run()` will proceed — see the [integration guide](./docs/integration.md#debugger-dap). To skip it, set `engine.debugger.enabled = false`.
-
----
-
-## Full API
+## API Overview
 
 ```ts
-const engine = await Engine.create('c'); // 'c' | 'python'
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Debugging                                                   │
+// ╰─────────────────────────────────────────────────────────────╯
 
-engine.fs; // DirNode  — virtual filesystem, set before run()
-engine.stdout; // Stdout   — .on('data', (chunk: Uint8Array) => …) / .off(...)
-engine.stderr; // Stdout
-engine.stdin; // Stdin    — .write(string | Uint8Array): Promise<void>
-engine.debugger; // Debugger — DAP interface; set .enabled = false to skip the handshake
-engine.lang; // Lang
+const engine = await Engine.create({
+  fs: {
+    'main.cpp': `int main() {
+        int x = 42;
+        return x;
+      }`
+  }
+});
 
-engine.run(); // Promise<RunResult> — { type: 'completed', exitCode } | { type: 'stopped' } | { type: 'error', error }
-engine.stop(); // void               — kills the worker; run() resolves with { type: 'stopped' }
+const proc = engine.run('cpp', { debug: true });
+await proc.debugger.setBreakpoints('main.cpp', [{ line: 3 }]);
 
-engine.debugger.send(message); // DAP request, returns response synchronously
-engine.debugger.on('event', fn); // async DAP events
-engine.debugger.on('artifact', fn); // download artifacts emitted by the engine
+const stop = await proc.debugger.continue();
+console.log(stop!.frames()[0].locals().vars());
+await proc.debugger.continue();
 
-// Python only — hide bridge/bdb frames from stackTrace (set before run())
-engine.debugger.filterInternals = true;
+/**
+ * Output:
+ *
+ *  [{ name: 'x', value: '42', type: 'int' }]
+ */
+
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Toolchain Support                                           │
+// ╰─────────────────────────────────────────────────────────────╯
+
+/* C++ (clang v22.1) */
+engine.run('cpp', ['passed', 'to', 'main'], {
+  sources: ['**/*.cpp'],
+  buildDir: '/build',
+  cxxFlags: ['-O2', '-DDEBUG'],
+  lldFlags: ['--export-all']
+});
+
+// Run clang/clang++ and lld directly:
+//
+//  engine.run('clang',   [/* flags */], { sysroot: 'cpp' });
+//  engine.run('clang++', [/* flags */], { sysroot: 'cpp' });
+//  engine.run('lld',     [/* flags */], { sysroot: 'cpp' });
+//
+
+/* Rust (rustc v1.96) */
+engine.run('rust', ['passed', 'to', 'main'], {
+  sources: ['**/*.rs'],
+  buildDir: '/build',
+  rustcFlags: ['-Copt-level=1'],
+  lldFlags: ['--export-all']
+});
+
+// Run rustc directly:
+//
+//  engine.run('rustc', [/* flags */], { sysroot: 'cpp' });
+//
+
+/* Python (cpython 3.11) */
+engine.run('python', ['main.py', '--arg1']);
+
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Filesystem                                                  │
+// ╰─────────────────────────────────────────────────────────────╯
+
+/* Mount from JSON */
+await fs.mount({
+  'main.py': "print('Crazy, crazy, crazy');",
+  tmp: {
+    files: [
+      bin: { files: [] },
+      'random.txt': "Stored in memory!"
+    ]
+  }
+});
+
+/* Mount from .tar.gz or .zip archive to a subpath */
+await fs.mount("https://example.com/archive.tar.gz", { at: "/tmp/archive"});
+
+await engine.fs.mkdir('/tmp/data', { recursive: true });
+await engine.fs.readFile('/main.cpp', 'utf8'); // string
+await engine.fs.readFile('/main.cpp'); // Uint8Array
+await engine.fs.writeFile('/hello.txt', "world");
+await engine.fs.rename('/hello.txt', '/world.txt');
+await engine.fs.remove("/tmp/archive", { recursive: true });
+await engine.fs.stat("/hello.txt");
+await engine.fs.readDir("/tmp");
+
+/* Export to JSON */
+await engine.fs.export();
+
+/* Export objects in build directory to zip */
+await engine.fs.export({ at: "/build", include: ["**/*.o"], format: 'zip' });
+
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Standard I/O                                                │
+// ╰─────────────────────────────────────────────────────────────╯
+
+const proc = engine.run("python", { stdin: true });
+
+proc.stdout.on("data", chunk => terminal.write(chunk));
+proc.stderr.on("data", chunk => terminal.write(chunk));
+
+await proc.stdin.write("Et tu, Brute?");
+proc.stdin.close();
+
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Pipes                                                       │
+// ╰─────────────────────────────────────────────────────────────╯
+
+import { Pipe } from 'debugger-sh';
+
+const pipe = new Pipe();
+const p1 = engine.run("python", ["producer.py"], { stdout: pipe });
+const p2 = engine.run("python", ["consumer.py"], { stdin: pipe });
+
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Devices                                                     │
+// ╰─────────────────────────────────────────────────────────────╯
+
+const input = new Pipe();
+const output = new Pipe()
+
+await engine.fs.writeFile('main.py', `
+  data = open('/dev/in').read()
+  open('/dev/out', 'w').write(data)
+`);
+
+output.on("text", console.log);
+await input.write("I put a spell on you");
+input.close();
+
+await engine.run("python", ["main.py"], {
+  devices: {
+    "/dev/in": input,
+    "/dev/out": output
+  }
+});
 ```
 
-See [Presentation filtering (Python)](./docs/integration.md#presentation-filtering-python) in the integration guide for stack `presentationHint`, frame naming (`__main__` vs `main`), and dunder local filtering.
+## Running Locally
 
----
-
-## Wiring stdin
-
-`engine.stdin.write()` accepts a UTF-8 string or `Uint8Array`. Programs read via `cin`, `scanf`, `read()`, etc.
-
-```ts
-await engine.stdin.write('42\n');
-await engine.stdin.write(new TextEncoder().encode('42\n'));
-```
-
----
-
-## Example project
-
-For a full reference integration, see the [debugger.sh IDE](https://github.com/debugger-sh/debugger.sh) — a Next.js + MUI app wiring up CodeMirror 6, xterm.js, and `debugger-sh` into a working in-browser IDE.
-
----
-
-## Contributing / building from source
-
-> Requires [Cargo 1.91+](https://crates.io/), [wasm-pack](https://rustwasm.github.io/wasm-pack/), and Node v22+.
+> Requires [rustup](https://rustup.rs/) and [Node](https://nodejs.org/en) v22+.
 
 ```bash
 cargo install wasm-pack
 npm install
-npm run build   # wasm-pack build --target web && vite build
-npm run dev     # local development
-```
+npm run build           # wasm-pack build --target web && vite build
 
-To test against the reference IDE, clone [debugger-sh/debugger.sh](https://github.com/debugger-sh/debugger.sh) alongside this repo and link:
-
-```bash
-npm link                  # in this repo
-cd ../debugger.sh
-npm link debugger-sh
-npm run dev
+npm run dev             # Hot rebuild library on changes
+npm test                # Tests browser functionality
+npm run tools:dap       # Test debugger functionality
 ```

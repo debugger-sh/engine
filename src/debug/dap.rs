@@ -110,6 +110,7 @@ impl DapDebugger for DwarfBackend {
     }
 
     fn set_breakpoints(&mut self, source: &str, lines: &[i64]) -> Result<Value> {
+        self.debugger.clear_breakpoints(source);
         let bps: Vec<_> = lines
             .iter()
             .map(|line| {
