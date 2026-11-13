@@ -46,29 +46,6 @@ engine.dispose();
 
 ```ts
 // ╭─────────────────────────────────────────────────────────────╮
-// │ Toolchain Support                                           │
-// ╰─────────────────────────────────────────────────────────────╯
-
-/* C++ */
-engine.run('cpp', ['passed', 'to', 'main'], {
-  sources: ['**/*.cpp'],
-  buildDir: '/build',
-  cxxFlags: ['-O2', '-DDEBUG'],
-  lldFlags: ['--export-all']
-});
-
-/* Rust */
-engine.run('rust', ['passed', 'to', 'main'], {
-  sources: ['**/*.rs'],
-  buildDir: '/build',
-  rustcFlags: ['-Copt-level=1'],
-  lldFlags: ['--export-all']
-});
-
-/* Python */
-engine.run('python', ['main.py', '--arg1']);
-
-// ╭─────────────────────────────────────────────────────────────╮
 // │ Debugging                                                   │
 // ╰─────────────────────────────────────────────────────────────╯
 
@@ -93,6 +70,43 @@ await proc.debugger.continue();
  *
  *  [{ name: 'x', value: '42', type: 'int' }]
  */
+
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Toolchain Support                                           │
+// ╰─────────────────────────────────────────────────────────────╯
+
+/* C++ */
+engine.run('cpp', ['passed', 'to', 'main'], {
+  sources: ['**/*.cpp'],
+  buildDir: '/build',
+  cxxFlags: ['-O2', '-DDEBUG'],
+  lldFlags: ['--export-all']
+});
+
+// Run clang/clang++ and lld directly:
+//
+//  engine.run('clang',   [/* flags */], { sysroot: 'cpp' });
+//  engine.run('clang++', [/* flags */], { sysroot: 'cpp' });
+//  engine.run('lld',     [/* flags */], { sysroot: 'cpp' });
+//
+
+/* Rust */
+engine.run('rust', ['passed', 'to', 'main'], {
+  sources: ['**/*.rs'],
+  buildDir: '/build',
+  rustcFlags: ['-Copt-level=1'],
+  lldFlags: ['--export-all']
+});
+
+// Run rustc directly:
+//
+//  engine.run('rustc', [/* flags */], { sysroot: 'cpp' });
+//
+
+/* Python */
+engine.run('python', ['main.py', '--arg1']);
+
 
 // ╭─────────────────────────────────────────────────────────────╮
 // │ Filesystem                                                  │
@@ -127,6 +141,7 @@ await engine.fs.export();
 /* Export objects in build directory to zip */
 await engine.fs.export({ at: "/build", include: ["**/*.o"], format: 'zip' });
 
+
 // ╭─────────────────────────────────────────────────────────────╮
 // │ Standard I/O                                                │
 // ╰─────────────────────────────────────────────────────────────╯
@@ -139,6 +154,7 @@ proc.stderr.on("data", chunk => terminal.write(chunk));
 await proc.stdin.write("Et tu, Brute?");
 proc.stdin.close();
 
+
 // ╭─────────────────────────────────────────────────────────────╮
 // │ Pipes                                                       │
 // ╰─────────────────────────────────────────────────────────────╯
@@ -148,6 +164,7 @@ import { Pipe } from 'debugger-sh';
 const pipe = new Pipe();
 const p1 = engine.run("python", ["producer.py"], { stdout: pipe });
 const p2 = engine.run("python", ["consumer.py"], { stdin: pipe });
+
 
 // ╭─────────────────────────────────────────────────────────────╮
 // │ Devices                                                     │
