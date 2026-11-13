@@ -201,9 +201,9 @@ export class Engine {
       stderr: options.stderr ?? flowing()
     };
     // Pipes given to the process (including its own) are closed once it exits.
-    const pipes = [...Object.values(stdio), ...Object.values(options.devices ?? {})].filter(
-      (device): device is Pipe => device instanceof Pipe && device[Internals].close
-    );
+    const pipes = [...Object.values(stdio), ...Object.values(options.devices ?? {})]
+      .flatMap((device) => (device instanceof Duplex ? [device.to, device.from] : [device]))
+      .filter((device): device is Pipe => device instanceof Pipe && device[Internals].close);
     const debug = options.debug ? new Debugger(Internals) : undefined;
     const process = this.#spawn(stdio, debug, command, args, options, pipes);
 
@@ -334,11 +334,10 @@ export class Engine {
     const { stdin, stdout, stderr } = process[Internals].stdio;
     const python = debug === 'python' ? process.debugger?.[Internals].python() : undefined;
     const devices = Object.entries({ ...options.devices, ...python }).map(([path, device]) => {
-      const pipe = device instanceof Pipe;
-      const buffer = pipe ? device[Internals].buffer : device;
-      const write =
-        device instanceof Duplex ? device[Internals].write[Internals].buffer : undefined;
-      return { path: join(path), buffer, pipe, write };
+      const [from, to] = device instanceof Duplex ? [device.from, device.to] : [device];
+      const pipe = from instanceof Pipe;
+      const buffer = pipe ? from[Internals].buffer : from;
+      return { path: join(path), buffer, pipe, write: to?.[Internals].buffer };
     });
     const job = {
       name,

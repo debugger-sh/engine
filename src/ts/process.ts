@@ -264,7 +264,7 @@ export interface PipeOptions {
  * Represents a "device" that a process can interface with via the filesystem
  * to allow communicating with the outside environment or other processes.
  */
-export type Device = Pipe | SharedArrayBuffer;
+export type Device = Pipe | Duplex | SharedArrayBuffer;
 
 const HEADER = 16;
 const [READ, WRITE, SEQUENCE, CLOSED] = [0, 1, 2, 3];
@@ -453,8 +453,8 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
 /**
  * A pair of pipes for two-way communication with a process through a single device.
  *
- * Writes go to one pipe, which processes read from, and reads come from the other,
- * which processes write to. Closing a duplex closes both.
+ * Writes go to the {@link Duplex.to} pipe, which processes read from, and reads come from
+ * the {@link Duplex.from} pipe, which processes write to. Closing a duplex closes both.
  *
  * ```ts
  * const dup = new Duplex();
@@ -463,23 +463,43 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
  * console.log(await dup.read());
  * ```
  */
-export class Duplex extends Pipe {
-  /** @internal `write` is the pipe written to (and read by processes). */
-  declare readonly [Internals]: Pipe[typeof Internals] & { write: Pipe };
+export class Duplex extends EventEmitter<ReadableEventsMap> implements Readable, Writable {
+  /** The pipe written to processes. */
+  public readonly to: Pipe;
+  /** The pipe read from processes. */
+  public readonly from: Pipe;
 
   constructor(options: PipeOptions = {}) {
-    super(options);
-    this[Internals].write = new Pipe(options);
+    super();
+    [this.to, this.from] = [new Pipe(options), new Pipe(options)];
+    this.from.on('data', (chunk) => this.emit('data', chunk));
+    this.from.on('text', (text) => this.emit('text', text));
+    this.from.on('end', () => this.emit('end'));
   }
 
-  public override write(value: Uint8Array | string): Promise<void> {
-    return this[Internals].write.write(value);
+  public get closed(): boolean {
+    return this.from.closed;
   }
 
-  public override close(): void {
-    // `write` is still absent when `super` closes a pipe without capacity.
-    this[Internals].write?.close();
-    super.close();
+  public write(value: Uint8Array | string): Promise<void> {
+    return this.to.write(value);
+  }
+
+  public close(): void {
+    this.to.close();
+    this.from.close();
+  }
+
+  public read(): Promise<Uint8Array> {
+    return this.from.read();
+  }
+
+  public [Symbol.asyncIterator](): AsyncIterator<Uint8Array> {
+    return this.from[Symbol.asyncIterator]();
+  }
+
+  public lines(): AsyncIterable<string> {
+    return this.from.lines();
   }
 }
 
