@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="debugger-sh" src="assets/logo.png" width="280" />
+  <img alt="debugger-sh" src="docs/logo.png" width="280" />
 </p>
 
 A browser-based execution engine powered by WebAssembly. Compile, run, and debug C/C++, Rust and Python programs entirely in the browser.
