@@ -128,7 +128,7 @@ await fs.mount("https://example.com/archive.tar.gz", { at: "/tmp/archive"});
 
 await engine.fs.mkdir('/tmp/data', { recursive: true });
 await engine.fs.readFile('/main.cpp', 'utf8'); // string
-await engine.fs.readFile('/main.cpp', 'utf8'); // Uint8Array
+await engine.fs.readFile('/main.cpp'); // Uint8Array
 await engine.fs.writeFile('/hello.txt', "world");
 await engine.fs.rename('/hello.txt', '/world.txt');
 await engine.fs.remove("/tmp/archive", { recursive: true });
