@@ -6,8 +6,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use serde::{Deserialize, Deserializer};
-use wasm_bindgen::{JsCast, JsValue};
+use serde::Deserialize;
 use wasmer_wasix::virtual_fs::{
     AsyncRead, AsyncSeek, AsyncWrite, FsError, ReadBuf, Result, VirtualFile,
 };
@@ -20,20 +19,12 @@ pub struct Device {
     pub path: PathBuf,
     #[serde(with = "serde_wasm_bindgen::preserve")]
     buffer: js_sys::SharedArrayBuffer,
-    /// Whether `buffer` backs a [`PipeDevice`] (rather than a [`SharedBufferDevice`]).
+    /// Whether this is a pipe or duplex ([`DuplexDevice`]), rather than a [`SharedBufferDevice`].
     pipe: bool,
     /// For a [`DuplexDevice`], the buffer of the pipe the main thread writes to (which the
-    /// device reads, writing to `buffer`).
-    #[serde(default, deserialize_with = "optional")]
-    write: Option<js_sys::SharedArrayBuffer>,
-}
-
-/// Like `serde_wasm_bindgen::preserve`, for an optional value.
-fn optional<'de, D: Deserializer<'de>>(
-    de: D,
-) -> std::result::Result<Option<js_sys::SharedArrayBuffer>, D::Error> {
-    let value: JsValue = serde_wasm_bindgen::preserve::deserialize(de)?;
-    Ok(value.dyn_into().ok())
+    /// device reads, writing to `buffer`). Otherwise, the same as `buffer`.
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    write: js_sys::SharedArrayBuffer,
 }
 
 // SAFETY: workers are single-threaded, and the buffer is only accessed through atomics or
@@ -43,13 +34,12 @@ unsafe impl Sync for Device {}
 
 impl Device {
     pub fn open(&self) -> Box<dyn VirtualFile + Send + Sync> {
-        match (self.pipe, &self.write) {
-            (true, Some(write)) => Box::new(DuplexDevice {
-                read: PipeDevice::new(write, None),
+        match self.pipe {
+            true => Box::new(DuplexDevice {
+                read: PipeDevice::new(&self.write, None),
                 write: PipeDevice::new(&self.buffer, None),
             }),
-            (true, None) => Box::new(PipeDevice::new(&self.buffer, None)),
-            (false, _) => Box::new(SharedBufferDevice::new(&self.buffer)),
+            false => Box::new(SharedBufferDevice::new(&self.buffer)),
         }
     }
 }
