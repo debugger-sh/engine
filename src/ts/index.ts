@@ -376,7 +376,15 @@ export class Engine {
   }
 }
 
-export type { Debugger } from './debugger';
+export type {
+  Debugger,
+  DebuggerProtocol,
+  Frame,
+  Scope,
+  Stop,
+  Variable,
+  VariableOptions
+} from './debugger';
 export type {
   Directory,
   ExportOptions,

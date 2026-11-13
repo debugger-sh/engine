@@ -483,18 +483,18 @@ proc.stdout.on('data', (chunk) => terminal.write(chunk));
 
 ### Debugging a process
 
-The existing debugger interface is preserved, but each call to `run` creates a new `Debugger` instance tied to that process. Ordinarily, processes will make forward progress after `run` is called; however, in the case that debugging is enabled, they will only make progress pending the completion of the DAP handshake.
+The existing debugger interface is preserved as `dap` (beneath a [higher-level interface](./features/debugging/usage.md)), but each call to `run` creates a new `Debugger` instance tied to that process. Ordinarily, processes will make forward progress after `run` is called; however, in the case that debugging is enabled, they will only make progress pending the completion of the DAP handshake.
 
 ```ts
 const proc = engine.run('cpp', { debug: true });
 
 /** Setup callbacks for handling DAP events */
-proc.debugger.on('event', (msg) => {
+proc.debugger.dap.on('event', (msg) => {
   /* ... */
 });
 
 /** Send DAP initialize request */
-proc.debugger.send({ type: 'request', command: 'initialize' /* ... */ });
+proc.debugger.dap.send({ type: 'request', command: 'initialize' /* ... */ });
 ```
 
 As is currently the case, the debugger for a compiler-enabled toolchain (e.g. C/C++, Rust) debugs only the execution step in a toolchain (i.e. the user's code). For a process without `debug: true`, `proc.debugger` is `undefined`.

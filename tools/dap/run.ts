@@ -1,5 +1,7 @@
+import type { DebugProtocol } from '@vscode/debugprotocol';
 import { $ } from 'bun';
 import chalk from 'chalk';
+import type { FileTree } from 'debugger-sh';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -44,13 +46,13 @@ export type Lang = 'c' | 'python' | 'rust';
 
 export type BackendOptions = {
   testDir: string;
-  fsNode: Record<string, Json>;
+  fsNode: FileTree;
   lang: Lang;
 };
 
 export interface Backend {
-  send(req: Json): Promise<Json>;
-  onEvent(cb: (e: Json) => void): void;
+  send(request: DebugProtocol.Request): Promise<DebugProtocol.Response>;
+  onEvent(listener: (event: DebugProtocol.Event) => void): void;
   shutdown(): Promise<void>;
 }
 
@@ -202,16 +204,16 @@ async function readJsonFile<T>(filePath: string): Promise<T> {
   }
 }
 
-async function collectFsNode(dirPath: string): Promise<Record<string, Json>> {
-  async function walk(current: string): Promise<Record<string, Json>> {
-    const out: Record<string, Json> = {};
+async function collectFsNode(dirPath: string): Promise<FileTree> {
+  async function walk(current: string): Promise<FileTree> {
+    const out: FileTree = {};
     const entries = (await readdir(current, { withFileTypes: true })).sort((a, b) =>
       a.name.localeCompare(b.name)
     );
     for (const entry of entries) {
       const abs = path.join(current, entry.name);
       if (entry.isDirectory()) {
-        out[entry.name] = await walk(abs);
+        out[entry.name] = { files: await walk(abs) };
       } else if (entry.isFile()) {
         const content = await readFile(abs, 'utf8');
         out[entry.name] = content;
@@ -232,7 +234,7 @@ function fmtJson(v: unknown): string {
 
 function formatMismatch(
   expected: Json,
-  received: Json,
+  received: unknown,
   result: Extract<MatchResult, { success: false }>
 ): string {
   const bar = ` |`;
@@ -261,26 +263,15 @@ function asError(err: unknown): Error {
 }
 
 async function waitForEvent(
-  queue: Json[],
-  waitForNext: () => Promise<Json>,
+  queue: DebugProtocol.Event[],
+  waitForNext: () => Promise<DebugProtocol.Event>,
   eventName: string,
   timeoutMs: number
-): Promise<Json> {
+): Promise<DebugProtocol.Event> {
   const endAt = Date.now() + timeoutMs;
   while (Date.now() < endAt) {
-    for (let i = 0; i < queue.length; i++) {
-      const event = queue[i];
-      if (
-        event &&
-        typeof event === 'object' &&
-        !Array.isArray(event) &&
-        event.type === 'event' &&
-        event.event === eventName
-      ) {
-        queue.splice(i, 1);
-        return event;
-      }
-    }
+    const index = queue.findIndex((event) => event.event === eventName);
+    if (index >= 0) return queue.splice(index, 1)[0];
     const remaining = endAt - Date.now();
     if (remaining <= 0) break;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -318,9 +309,9 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
         ? await createLldbBackend(backendOpts)
         : await createEngineBackend(backendOpts);
 
-  const eventQueue: Json[] = [];
-  const rawDapLog: Json[] = [];
-  let resolveEventWaiter: ((v: Json) => void) | null = null;
+  const eventQueue: DebugProtocol.Event[] = [];
+  const rawDapLog: DebugProtocol.ProtocolMessage[] = [];
+  let resolveEventWaiter: ((v: DebugProtocol.Event) => void) | null = null;
 
   backend.onEvent((event) => {
     rawDapLog.push(event);
@@ -332,29 +323,26 @@ async function runTest(testName: string, opts: CliOpts): Promise<void> {
     }
   });
   const waitForNextEvent = () =>
-    new Promise<Json>((resolve) => {
+    new Promise<DebugProtocol.Event>((resolve) => {
       resolveEventWaiter = resolve;
     });
 
   const captures: CaptureMap = {};
   let seq = 1;
-  let lastResponse: Json | null = null;
+  let lastResponse: DebugProtocol.Response | null = null;
 
   const executeStep = async (step: Step, label: string, visible: boolean) => {
     if (step.type === 'request') {
       if (visible) logStep(`${label} ${step.command}`);
-      const reqObj = substitutePlaceholders(
-        {
-          type: 'request',
-          seq: seq++,
-          command: step.command,
-          arguments: step.arguments ?? {}
-        },
-        captures
-      ) as Json;
-      rawDapLog.push(reqObj);
+      const request: DebugProtocol.Request = {
+        type: 'request',
+        seq: seq++,
+        command: step.command,
+        arguments: substitutePlaceholders(step.arguments ?? {}, captures)
+      };
+      rawDapLog.push(request);
 
-      lastResponse = await backend.send(reqObj);
+      lastResponse = await backend.send(request);
       rawDapLog.push(lastResponse);
       return;
     }

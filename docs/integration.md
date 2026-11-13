@@ -82,13 +82,25 @@ proc.kill();
 
 ## Debugger (DAP)
 
-The debugger exposes a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) interface. Requests are sent synchronously and return a response. DAP messages (events, and optionally routed responses) are emitted asynchronously through the `event` listener.
-
-Each process started with `debug: true` has its own debugger, which debugs the user program (not the compiler or linker steps):
+Each process started with `debug: true` has its own debugger, which debugs the user program (not the compiler or linker steps). The program starts once the debugger first continues (or steps):
 
 ```ts
 const proc = engine.run('cpp', { debug: true });
 const dbg = proc.debugger;
+
+await dbg.setBreakpoints('main.cpp', [{ line: 5 }]);
+
+// Resolves with the next stop (as do stepIn, stepOver and stepOut), or null once the program exits
+for (let stop = await dbg.continue(); stop; stop = await dbg.continue()) {
+  const [frame] = stop.frames(); // queried on each call, and valid until the program resumes
+  for (const { name, value } of frame.locals().vars()) console.log(`${name} = ${value}`);
+}
+```
+
+This is a thin wrapper around a [Debug Adapter Protocol](https://microsoft.github.io/debug-adapter-protocol/) interface, which is also available directly through `proc.debugger.dap`. Requests are sent synchronously and return a response. DAP messages (events, and optionally routed responses) are emitted asynchronously through the `event` listener.
+
+```ts
+const dbg = proc.debugger.dap;
 
 dbg.on('event', (msg) => {
   // receives both events (type: 'event') and — if you choose to route them here — responses

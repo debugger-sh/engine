@@ -82,10 +82,14 @@ await pipe.read(); // or `for await (const chunk of pipe)`, `pipe.lines()`
 pipe.flow(); // consume every chunk as it arrives, firing `data` (and `end`)
 pipe.close();
 
-// Debugging (DAP): the process waits for the handshake
-const debuggable = engine.run('python', { debug: true });
-debuggable.debugger.send(request); // returns the response synchronously
-debuggable.debugger.on('event', fn);
+// Debugging: the program starts once the debugger first continues (or steps)
+const dbg = engine.run('python', { debug: true }).debugger;
+await dbg.setBreakpoints('main.py', [{ line: 3 }]); // [{ verified: true, line: 3 }]
+const stop = await dbg.continue(); // or stepIn, stepOver, stepOut: null once the program exits
+stop?.frames()[0].locals().vars(); // frames, scopes and variables are queried on each call
+dbg.on('stop', fn);
+dbg.dap.send(request); // or use the Debug Adapter Protocol (DAP) directly
+dbg.dap.on('event', fn);
 ```
 
 The full interface is described in [docs/rewrite/interface.md](./docs/rewrite/interface.md), and the
