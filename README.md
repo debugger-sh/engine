@@ -76,7 +76,7 @@ await proc.debugger.continue();
 // │ Toolchain Support                                           │
 // ╰─────────────────────────────────────────────────────────────╯
 
-/* C++ */
+/* C++ (clang v22.1) */
 engine.run('cpp', ['passed', 'to', 'main'], {
   sources: ['**/*.cpp'],
   buildDir: '/build',
@@ -91,7 +91,7 @@ engine.run('cpp', ['passed', 'to', 'main'], {
 //  engine.run('lld',     [/* flags */], { sysroot: 'cpp' });
 //
 
-/* Rust */
+/* Rust (rustc v1.96) */
 engine.run('rust', ['passed', 'to', 'main'], {
   sources: ['**/*.rs'],
   buildDir: '/build',
@@ -104,7 +104,7 @@ engine.run('rust', ['passed', 'to', 'main'], {
 //  engine.run('rustc', [/* flags */], { sysroot: 'cpp' });
 //
 
-/* Python */
+/* Python (cpython 3.11) */
 engine.run('python', ['main.py', '--arg1']);
 
 
