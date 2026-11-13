@@ -182,7 +182,8 @@ export interface Readable extends AsyncIterable<Uint8Array>, EventEmitter<Readab
   on(event: 'end', listener: () => void): this;
 
   /**
-   * Wait for bytes to be available for reading.
+   * Wait for bytes to be available for reading. If there is no data available,
+   * this will block until bytes become available.
    *
    * @returns A promise which resolves with the next available chunk of bytes written.
    */

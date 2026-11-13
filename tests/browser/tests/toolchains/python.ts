@@ -47,7 +47,7 @@ test('exits non-zero without any Python file', async () => {
 
 test('runs a REPL with repl: true', async () => {
   const engine = await eng();
-  const proc = engine.run('python', { repl: true });
+  const proc = engine.run('python', { repl: true, stdin: true });
   const result = expect(proc).outputs({ stdout: expect.stringContaining('2') });
   await proc.stdin.write('print(1 + 1)\n');
   proc.stdin.close();

@@ -1,6 +1,8 @@
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- only referenced by {@link} in doc comments
 import type { Engine } from '.';
 import type { Fs } from '../../pkg/engine';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only referenced by {@link} in doc comments
+import type { Debugger } from './debugger';
 import type { Filesystem } from './fs';
 import type { Device, Pipe, Process } from './process';
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- only referenced by {@link} in doc comments
@@ -58,6 +60,10 @@ export interface RunOptions {
    * The debugging interface will be accessible through {@link Process.debugger}.
    * Currently, WASI executables with debug info (e.g. those compiled via the `rust`
    * and `cpp` toolchains) as well Python programs currently support debugging.
+   *
+   * When using this option, be careful not to immediately await the returned process to avoid hanging.
+   * Debugged programs start in a paused state to allow configuring breakpoints
+   * and other settings, and must be manually unpaused via {@link Debugger.continue}.
    */
   debug?: boolean;
 
@@ -171,9 +177,10 @@ export interface PythonOptions {
   /**
    * When no args are provided, whether or not to run an interactive REPL.
    *
-   * If `false`, will run the first `.py` program found in the workspace.
-   * If `true`, {@link RunOptions.stdin} will default `true` to enable
-   * interactive input.
+   * This option should probably be paired with {@link RunOptions.stdin}.
+   *
+   * If `false`, will run the first `.py` program found in the workspace
+   * when no args are provided.
    *
    * @default false
    */

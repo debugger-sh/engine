@@ -80,10 +80,17 @@ function cached<T>(
   return promise;
 }
 
+export interface EngineOptions {
+  /**
+   * Create the filesystem with this default state.
+   *
+   * This supports the same shape as {@link Filesystem.mount}.
+   */
+  fs?: Parameters<Filesystem['mount']>[0];
+}
+
 /**
  * An engine is a shared workspace for running programs.
- * It can be created with {@link Engine.create} and should be cleaned up
- * using {@link Engine.dispose} when you are done with it.
  */
 export class Engine {
   /** The in-memory filesystem shared by all processes */
@@ -93,8 +100,8 @@ export class Engine {
   readonly #processes = new Set<Process>();
   #disposed = false;
 
-  /** Creates an engine. */
-  static async create(): Promise<Engine> {
+  /** Creates an engine. Remember to call {@link Engine.dispose} when you're done with it. */
+  static async create(options?: EngineOptions): Promise<Engine> {
     runtime ??= (async () => {
       const binary = wasmBinary as unknown as URL | Uint8Array<ArrayBuffer>;
       const module = await WebAssembly.compile(
@@ -103,7 +110,10 @@ export class Engine {
       const exports = await init({ module_or_path: module });
       return { module, exports };
     })();
-    return new Engine(Internals, await runtime);
+
+    const engine = new Engine(Internals, await runtime);
+    if (options?.fs) await engine.fs.mount(options.fs);
+    return engine;
   }
 
   /** @internal */
@@ -183,7 +193,6 @@ export class Engine {
         return pipe;
       }
       if (value === true) return new Pipe();
-      if (value === undefined && 'repl' in options && Boolean(options.repl)) return new Pipe();
       return closed();
     };
     const stdio = {

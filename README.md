@@ -1,6 +1,8 @@
-# debugger-sh
+<p align="center">
+  <img alt="debugger-sh" src="assets/logo.png" width="280" />
+</p>
 
-A browser-based execution engine powered by WebAssembly. Compile, run and debug C/C++, Rust and Python programs entirely in the browser.
+A browser-based execution engine powered by WebAssembly. Compile, run, and debug C/C++, Rust and Python programs entirely in the browser.
 
 ## Installation
 
@@ -8,7 +10,7 @@ A browser-based execution engine powered by WebAssembly. Compile, run and debug 
 npm install debugger-sh
 ```
 
-> **Requires** these response headers (the engine shares memory between threads):
+> To use this library, these response headers must be enabled in your server [[learn more]](https://web.dev/articles/why-coop-coep):
 >
 > ```
 > Cross-Origin-Embedder-Policy: require-corp
@@ -17,111 +19,170 @@ npm install debugger-sh
 
 ---
 
-## Quick start
+## Quickstart
 
 ```ts
 import { Engine } from 'debugger-sh';
 
-const engine = await Engine.create();
-
-// A shared, in-memory filesystem, visible to every process as it runs
-await engine.fs.mount({
-  'main.cpp': `
-    #include <iostream>
-    int main() { std::cout << "Hello, world!" << std::endl; }
-  `
+/* Create the engine with some files */
+const engine = await Engine.create({
+  fs: {
+    'main.cpp': `
+      #include <iostream>
+      int main() { std::cout << "Hello, world!" << std::endl; }`
+  }
 });
 
-// Compile, link and run. Processes start immediately and are awaitable.
+/* Compile and run C++ programs */
 const proc = engine.run('cpp');
-proc.stdout.on('data', (chunk) => console.log(new TextDecoder().decode(chunk)));
+proc.stdout.on('text', (output) => console.log(output));
 console.log(await proc); // { exitCode: 0, killed: false }
 
+/* Dipose of the engine's resources when you're done */
 engine.dispose();
 ```
 
----
-
-## API overview
+## API Overview
 
 ```ts
-const engine = await Engine.create();
-engine.dispose(); // kills running processes and frees the engine
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Toolchain Support                                           │
+// ╰─────────────────────────────────────────────────────────────╯
 
-// Filesystem (relative paths are relative to "/")
-await engine.fs.mount(tree | tarOrZipBytes | url, { at: '/' });
-await engine.fs.export({ format: 'tree' | 'tar' | 'zip', at, include, exclude });
-await engine.fs.readFile(path, 'utf8'); // or Uint8Array without an encoding
-await engine.fs.writeFile(path, contents);
-(await engine.fs.mkdir(path, { recursive }), remove(path, { recursive }), rename(from, to));
-(await engine.fs.stat(path), readDir(path));
-
-// Processes: toolchains (cpp, rust, python), built-ins (clang, clang++, lld, rustc),
-// or WASI executables (a URL, a path like /build/main or ./main, or bytes)
-const proc = engine.run('cpp', ['program', 'args'], {
-  env,
-  sysroot,
-  debug,
-  stdin, // pipes (by default, stdin is closed, and new stdout and stderr pipes flow; `stdin: true` opens it)
-  stdout,
-  stderr,
-  devices: { '/dev/in': new Pipe(), '/dev/fb': new SharedArrayBuffer(size) },
-  ...toolchainOptions
+/* C++ */
+engine.run('cpp', ['passed', 'to', 'main'], {
+  sources: ['**/*.cpp'],
+  buildDir: '/build',
+  cxxFlags: ['-O2', '-DDEBUG'],
+  lldFlags: ['--export-all']
 });
-proc.stdin.write('input'); // with `stdin: true` or your own pipe
+
+/* Rust */
+engine.run('rust', ['passed', 'to', 'main'], {
+  sources: ['**/*.rs'],
+  buildDir: '/build',
+  rustcFlags: ['-Copt-level=1'],
+  lldFlags: ['--export-all']
+});
+
+/* Python */
+engine.run('python', ['main.py', '--arg1']);
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Debugging                                                   │
+// ╰─────────────────────────────────────────────────────────────╯
+
+const engine = await Engine.create({
+  fs: {
+    'main.cpp': `int main() {
+        int x = 42;
+        return x;
+      }`
+  }
+});
+
+const proc = engine.run('cpp', { debug: true });
+await proc.debugger.setBreakpoints('main.cpp', [{ line: 3 }]);
+
+const stop = await proc.debugger.continue();
+console.log(stop!.frames()[0].locals().vars());
+await proc.debugger.continue();
+
+/**
+ * Output:
+ *
+ *  [{ name: 'x', value: '42', type: 'int' }]
+ */
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Filesystem                                                  │
+// ╰─────────────────────────────────────────────────────────────╯
+
+/* Mount from JSON */
+await fs.mount({
+  'main.py': "print('Crazy, crazy, crazy');",
+  tmp: {
+    files: [
+      bin: { files: [] },
+      'random.txt': "Stored in memory!"
+    ]
+  }
+});
+
+/* Mount from .tar.gz or .zip archive to a subpath */
+await fs.mount("https://example.com/archive.tar.gz", { at: "/tmp/archive"});
+
+await engine.fs.mkdir('/tmp/data', { recursive: true });
+await engine.fs.readFile('/main.cpp', 'utf8'); // string
+await engine.fs.readFile('/main.cpp', 'utf8'); // Uint8Array
+await engine.fs.writeFile('/hello.txt', "world");
+await engine.fs.rename('/hello.txt', '/world.txt');
+await engine.fs.remove("/tmp/archive", { recursive: true });
+await engine.fs.stat("/hello.txt");
+await engine.fs.readDir("/tmp");
+
+/* Export to JSON */
+await engine.fs.export();
+
+/* Export objects in build directory to zip */
+await engine.fs.export({ at: "/build", include: ["**/*.o"], format: 'zip' });
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Standard I/O                                                │
+// ╰─────────────────────────────────────────────────────────────╯
+
+const proc = engine.run("python", { stdin: true });
+
+proc.stdout.on("data", chunk => terminal.write(chunk));
+proc.stderr.on("data", chunk => terminal.write(chunk));
+
+await proc.stdin.write("Et tu, Brute?");
 proc.stdin.close();
-proc.stdout.on('data', fn);
-proc.stderr.on('data', fn);
-proc.kill(); // resolves with { exitCode: 137, killed: true }
-await proc; // { exitCode, killed }
 
-// Pipes: buffered byte streams, shared with processes as stdio or devices
-const pipe = new Pipe({ capacity: 4096, close: true }); // closed once a process using it exits
-await pipe.write('bytes');
-await pipe.read(); // or `for await (const chunk of pipe)`, `pipe.lines()`
-pipe.flow(); // consume every chunk as it arrives, firing `data` (and `end`)
-pipe.close();
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Pipes                                                       │
+// ╰─────────────────────────────────────────────────────────────╯
 
-// Debugging: the program starts once the debugger first continues (or steps)
-const dbg = engine.run('python', { debug: true }).debugger;
-await dbg.setBreakpoints('main.py', [{ line: 3 }]); // [{ verified: true, line: 3 }]
-const stop = await dbg.continue(); // or stepIn, stepOver, stepOut: null once the program exits
-stop?.frames()[0].locals().vars(); // frames, scopes and variables are queried on each call
-dbg.on('stop', fn);
-dbg.dap.send(request); // or use the Debug Adapter Protocol (DAP) directly
-dbg.dap.on('event', fn);
+import { Pipe } from 'debugger-sh';
+
+const pipe = new Pipe();
+const p1 = engine.run("python", ["producer.py"], { stdout: pipe });
+const p2 = engine.run("python", ["consumer.py"], { stdin: pipe });
+
+// ╭─────────────────────────────────────────────────────────────╮
+// │ Devices                                                     │
+// ╰─────────────────────────────────────────────────────────────╯
+
+const input = new Pipe();
+const output = new Pipe()
+
+await engine.fs.writeFile('main.py', `
+  data = open('/dev/in').read()
+  open('/dev/out', 'w').write(data)
+`);
+
+output.on("text", console.log);
+await input.write("I put a spell on you");
+input.close();
+
+await engine.run("python", ["main.py"], {
+  devices: {
+    "/dev/in": input,
+    "/dev/out": output
+  }
+});
 ```
 
-The full interface is described in [docs/rewrite/interface.md](./docs/rewrite/interface.md), and the
-debugger integration in the [integration guide](./docs/integration.md#debugger-dap).
+## Running Locally
 
----
-
-## Example project
-
-For a full reference integration, see the [debugger.sh IDE](https://github.com/debugger-sh/debugger.sh) — a Next.js + MUI app wiring up CodeMirror 6, xterm.js, and `debugger-sh` into a working in-browser IDE.
-
----
-
-## Contributing / building from source
-
-> Requires [rustup](https://rustup.rs/) (the nightly toolchain pinned in `rust-toolchain.toml` is needed to
-> build shared-memory WebAssembly), [wasm-pack](https://rustwasm.github.io/wasm-pack/), and Node v22+.
+> Requires [rustup](https://rustup.rs/) and [Node](https://nodejs.org/en) v22+.
 
 ```bash
 cargo install wasm-pack
 npm install
-npm run build          # wasm-pack build --target web && vite build
-npm run dev            # local development
-npm test               # tests/browser/tests, run in Chromium (Vitest)
-npm run tools:dap      # DAP integration tests
-```
+npm run build           # wasm-pack build --target web && vite build
 
-To test against the reference IDE, clone [debugger-sh/debugger.sh](https://github.com/debugger-sh/debugger.sh) alongside this repo and link:
-
-```bash
-npm link                  # in this repo
-cd ../debugger.sh
-npm link debugger-sh
-npm run dev
+npm run dev             # Hot rebuild library on changes
+npm test                # Tests browser functionality
+npm run tools:dap       # Test debugger functionality
 ```
