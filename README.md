@@ -71,6 +71,14 @@ await proc.debugger.continue();
  *  [{ name: 'x', value: '42', type: 'int' }]
  */
 
+/**
+ * You can also directly interface with the Debugger Adapter Protocol (DAP).
+ * See https://microsoft.github.io/debug-adapter-protocol/
+ */
+
+proc.debugger.dap.on('event', () => /* ... */);
+proc.debugger.dap.send({ type: 'request', /* ... */ });
+
 
 // ╭─────────────────────────────────────────────────────────────╮
 // │ Toolchain Support                                           │
