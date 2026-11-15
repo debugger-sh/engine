@@ -181,15 +181,18 @@ const p2 = engine.run("python", ["consumer.py"], { stdin: pipe });
 import { Duplex } from 'debugger-sh';
 
 const duplex = new Duplex();
-duplex.on("data", () => host.write("Brutus\n"));
-duplex.from.flow();
 
 await engine.fs.writeFile('main.py', `
   open('/dev/host', 'w').write('name?')
   print('Et tu,', open('/dev/host').readline())
 `);
 
-await engine.run("python", ["main.py"], { devices: { "/dev/host": duplex } });
+const proc = engine.run("python", ["main.py"], { devices: { "/dev/host": duplex } });
+proc.stdout.on("text", output => console.log(output));
+
+for await (const message of duplex) {
+  await duplex.write("Brutus\n");
+}
 ```
 
 ## Running Locally

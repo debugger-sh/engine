@@ -11,7 +11,7 @@ use wasmer_wasix::{WasiEnv, WasiError, WasiFunctionEnv};
 
 use crate::debug::instrument::{InstrumenterResult, instrument_wasm};
 use crate::fs::{Root, Shared, normalize};
-use crate::python::worker::BRIDGE;
+use crate::python::BRIDGE;
 use crate::util::weak_error;
 
 use debuggee::Debuggee;
