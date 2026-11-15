@@ -19,19 +19,16 @@ struct VectorData {
 
 impl StdVectorFormatter {
     fn data(value: &Variable) -> Result<VectorData> {
+        // Since libc++ 23, the pointers are nested in `__layout_`, which (in the unstable ABI)
+        // stores a `__size_` rather than an `__end_` pointer.
+        let layout = value.child_with_name("__layout_");
+        let value = layout.as_ref().unwrap_or(value);
         let begin = value
             .child_with_name("__begin_")
             .context("No child named '__begin_'")?;
-        let end = value
-            .child_with_name("__end_")
-            .context("No child named '__end_'")?;
-
         let begin_addr = begin
             .pointer_value()
             .context("std::vector __begin_ is unavailable")?;
-        let end_addr = end
-            .pointer_value()
-            .context("std::vector __end_ is unavailable")?;
 
         let elem_ty = begin
             .ty()
@@ -50,10 +47,21 @@ impl StdVectorFormatter {
             });
         }
 
-        let bytes = u64::from(end_addr).saturating_sub(u64::from(begin_addr));
+        let count = match value.child_with_name("__size_") {
+            Some(size) => size
+                .unsigned_value()
+                .context("std::vector __size_ is unavailable")?,
+            None => {
+                let end = value
+                    .child_with_name("__end_")
+                    .and_then(|end| end.pointer_value())
+                    .context("std::vector __end_ is unavailable")?;
+                u64::from(end).saturating_sub(u64::from(begin_addr)) / elem_size as u64
+            }
+        };
         Ok(VectorData {
             begin: begin.clone(),
-            count: bytes as usize / elem_size,
+            count: count as usize,
             elem_ty,
             elem_size,
         })

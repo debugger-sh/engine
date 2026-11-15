@@ -9,13 +9,26 @@ import type { Device, Pipe, Process } from './process';
 import type { PipeOptions, Readable } from './process';
 import { dirname, Internals, join } from './util';
 
-const LLVM = 'https://fabioibanez.github.io/website/llvm.core.wasm';
+/** The artifacts of each toolchain in `tools/toolchains`, inlined at build time. */
+const artifacts = import.meta.glob<Record<string, string>>(
+  '../../tools/toolchains/*/provenance.json',
+  { eager: true, import: 'artifacts' }
+);
+
+/** The URL of an artifact of a toolchain in `tools/toolchains`, e.g. `("llvm", "sysroot")`. */
+function getToolchainArtifact(toolchain: string, artifact: string): string {
+  const url = artifacts[`../../tools/toolchains/${toolchain}/provenance.json`]?.[artifact];
+  if (!url) throw new Error(`toolchain ${toolchain} has no artifact ${artifact}`);
+  return url;
+}
+
+const LLVM = getToolchainArtifact('llvm', 'llvm');
 const RUSTC = 'https://debugger-sh.github.io/engine/rustc.wasm';
 const PYTHON = 'https://runno.dev/langs/python-3.11.3.wasm';
 
 /** The default sysroot of each toolchain. */
 export const sysroots: Record<string, string> = {
-  cpp: 'https://fabioibanez.github.io/website/llvm-resources.tar.gz',
+  cpp: getToolchainArtifact('llvm', 'sysroot'),
   rust: 'https://debugger-sh.github.io/engine/rust-sysroot.tar.gz',
   python: 'https://runno.dev/langs/python-3.11.3.tar.gz'
 };

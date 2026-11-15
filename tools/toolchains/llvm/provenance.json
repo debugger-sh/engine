@@ -1,0 +1,14 @@
+{
+  "upstream": {
+    "repository": "https://github.com/llvm/llvm-project",
+    "revision": "392dfff97d29b59d77e5cac6d4b6ef2585fe7117"
+  },
+  "fork": {
+    "repository": "https://github.com/debugger-sh/llvm",
+    "release": "https://github.com/debugger-sh/llvm/releases/tag/0.3.15"
+  },
+  "artifacts": {
+    "llvm": "https://debugger-sh.github.io/llvm/0.3.15/llvm.wasm",
+    "sysroot": "https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.gz"
+  }
+}
