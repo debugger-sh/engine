@@ -205,6 +205,6 @@ npm install
 npm run build           # wasm-pack build --target web && vite build
 
 npm run dev             # Hot rebuild library on changes
-npm test                # Tests browser functionality
-npm run tools:dap       # Test debugger functionality
+npm run test:browser    # Tests browser functionality
+npm run test:dap        # Test debugger functionality
 ```

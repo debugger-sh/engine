@@ -1,18 +1,18 @@
-# DAP Integration Harness (`tools/dap`)
+# DAP Integration Harness (`tests/dap`)
 
 Use this tool to run end-to-end Debugger Adapter Protocol (DAP) integration tests.
 
-- Run all tests with `npm run tools:dap` (from repo root), or one test with `npm run tools:dap <test-name>`.
+- Run all tests with `npm run test:dap` (from repo root), or one test with `npm run test:dap <test-name>`.
 - It is safe (and encouraged) to run this alongside `npm run dev`. This tool will wait for any in-progress builds initiated by `npm run dev` to complete before starting the tests.
-- The harness links the local package into `tools/dap` before running tests.
-- It executes scripted DAP request/response/event flows from any `tools/dap/tests/**/dap.jsonc` against a real engine session (JSON with comments: `//` and `/* */`).
+- The harness links the local package into `tests/dap` before running tests.
+- It executes scripted DAP request/response/event flows from any `tests/dap/tests/**/dap.jsonc` against a real engine session (JSON with comments: `//` and `/* */`).
 - Tests can be nested (e.g. `tests/formatting/vector/`); a CLI name like `formatting` runs every test under that prefix.
-- For triage, the request/response/event stream is written to `tools/dap/output/<test-path>/log.json`.
+- For triage, the request/response/event stream is written to `tests/dap/output/<test-path>/log.json`.
 - The command prints step-by-step progress and mismatch details to stdout, and exits non-zero on failures.
 
 ## Test Cases
 
-Each test is a directory under `tools/dap/tests/` (at any depth) with a required **`dap.jsonc`** scenario file:
+Each test is a directory under `tests/dap/tests/` (at any depth) with a required **`dap.jsonc`** scenario file:
 
 ```jsonc
 {
@@ -45,11 +45,11 @@ Each test is a directory under `tools/dap/tests/` (at any depth) with a required
 
 ## Adding New Tests
 
-1. Create `tools/dap/tests/<path-to-test>/` (nested paths are fine).
+1. Create `tests/dap/tests/<path-to-test>/` (nested paths are fine).
 2. Add scenario input files needed by the engine in that folder (these are mounted into `engine.fs` for the test).
 3. Add `dap.jsonc` with ordered `steps`.
 4. Start from an existing test and keep expectations minimal-but-specific (assert only fields that should be stable).
-5. Run `npm run tools:dap -- <path-to-test>`; inspect `tools/dap/output/<path-to-test>/` and console mismatch output when iterating.
+5. Run `npm run test:dap -- <path-to-test>`; inspect `tests/dap/output/<path-to-test>/` and console mismatch output when iterating.
 
 ## Language tests
 
@@ -67,17 +67,17 @@ A test's language is declared by a top-level `"lang"` field in its `dap.jsonc`
 
 The `lang` field — not the directory name — selects which engine the test runs
 against (`Engine.create(lang)`). By convention tests still live under
-`tools/dap/tests/<language>/`:
+`tests/dap/tests/<language>/`:
 
 ```
-npm run tools:dap -- python
-npm run tools:dap -- python/basic
+npm run test:dap -- python
+npm run test:dap -- python/basic
 ```
 
 - By default every test runs against the **engine**. Golden-reference adapters are opt-in:
   - `--lldb` runs `c` tests against `lldb-dap`
   - `--debugpy` runs `python` tests against `debugpy` (`python3 -m pip install debugpy`; set `PYTHON=/path/to/python3` to override)
-- Backend adapters live in `tools/dap/backends/` (`engine.ts`, `lldb.ts`, `debugpy.ts`)
+- Backend adapters live in `tests/dap/backends/` (`engine.ts`, `lldb.ts`, `debugpy.ts`)
 
 Python tests mirror the C++ trace shape: `setBreakpoints` → `stopped` → `stackTrace` → `scopes` → `variables`. See `python/basic` (single frame) and `python/frames` (call stack).
 
@@ -86,19 +86,19 @@ Python tests mirror the C++ trace shape: `setBreakpoints` → `stopped` → `sta
 For any test, you can run the same `dap.jsonc` scenario against a real `lldb-dap` subprocess instead of the engine:
 
 ```
-npm run tools:dap -- --lldb
-npm run tools:dap -- --lldb <test-name>
-npm run tools:dap -- --lldb-path=/abs/path/to/lldb-dap
+npm run test:dap -- --lldb
+npm run test:dap -- --lldb <test-name>
+npm run test:dap -- --lldb-path=/abs/path/to/lldb-dap
 ```
 
 This lets you observe how a reference DAP implementation (the one shipped with Xcode / Homebrew LLVM) responds to the same scenario, so you can use it as a "golden standard" while iterating on the engine's DAP behavior.
 
 How it works:
 
-- The harness compiles each test's `main.{cpp,c,cc}` to a native binary at `tools/dap/output/<test>/lldb/prog` using `xcrun clang++ -g -O0 -fno-inline -fstandalone-debug` (or `clang` for `.c`).
+- The harness compiles each test's `main.{cpp,c,cc}` to a native binary at `tests/dap/output/<test>/lldb/prog` using `xcrun clang++ -g -O0 -fno-inline -fstandalone-debug` (or `clang` for `.c`).
 - It spawns `lldb-dap` over stdio with standard `Content-Length`-framed DAP, auto-injects a `launch` request after `initialize`, then runs your scenario steps unchanged.
 - Outgoing `source.path: "/main.cpp"` (the engine's virtualized path) is rewritten to the absolute path of the on-disk source so `setBreakpoints` resolves correctly.
-- `--lldb` mode is **exploratory**: mismatches are printed in the same diff format as engine mode, but the process always exits 0. The full request/response/event stream lands in `tools/dap/output/<test>/log.json` regardless of pass/fail — that's the log you read to see what lldb-dap actually returned.
+- `--lldb` mode is **exploratory**: mismatches are printed in the same diff format as engine mode, but the process always exits 0. The full request/response/event stream lands in `tests/dap/output/<test>/log.json` regardless of pass/fail — that's the log you read to see what lldb-dap actually returned.
 
 Adapter discovery order:
 

@@ -58,8 +58,8 @@ export interface Backend {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
-const TESTS_DIR = path.join(ROOT, 'tools/dap/tests');
-const OUTPUT_DIR = path.join(ROOT, 'tools/dap/output');
+const TESTS_DIR = path.join(ROOT, 'tests/dap/tests');
+const OUTPUT_DIR = path.join(ROOT, 'tests/dap/output');
 const DAP_TIMEOUT_MS = 1000;
 const DEV_BUILD_MARKER = path.join(ROOT, 'node_modules/build.lock');
 const COMMON_INIT_STEPS: Step[] = [
@@ -137,7 +137,7 @@ async function ensureEngineLinked() {
   await $`npm link debugger-sh`.cwd(HERE).quiet();
 }
 
-/** Relative path from `tools/dap/tests` using `/` (e.g. `formatting/string`). */
+/** Relative path from `tests/dap/tests` using `/` (e.g. `formatting/string`). */
 function testId(...segments: string[]): string {
   return path
     .join(...segments)
