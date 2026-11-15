@@ -202,7 +202,7 @@ for await (const message of duplex) {
 ```bash
 cargo install wasm-pack
 npm install
-npm run build           # wasm-pack build --target web && vite build
+npm run build
 
 npm run dev             # Hot rebuild library on changes
 npm run test:browser    # Tests browser functionality
