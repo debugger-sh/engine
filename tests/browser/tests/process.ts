@@ -1,4 +1,3 @@
-import { Pipe } from 'debugger-sh';
 import { expect, test } from 'vitest';
 
 import { eng, sleep, withTool } from '../helpers';
@@ -212,7 +211,7 @@ test('stdin Uint8Array is written and closed', async () => {
 
 test('stdin larger than its buffer', async () => {
   const tool = await withTool();
-  const stdin = new Pipe();
+  const stdin = tool.devices.pipe();
   const proc = tool.run('/bin/main', ['cat'], { stdin });
   const big = 'x'.repeat(100_000);
   const result = expect(proc).outputs({ stdout: big });
@@ -223,7 +222,7 @@ test('stdin larger than its buffer', async () => {
 
 test('stdin is forwarded until closed', async () => {
   const tool = await withTool();
-  const stdin = new Pipe();
+  const stdin = tool.devices.pipe();
   const proc = tool.run('/bin/main', ['cat'], { stdin });
   const result = expect(proc).outputs({ stdout: 'CS198! bytes' });
   expect(proc.stdin.closed).toBe(false);

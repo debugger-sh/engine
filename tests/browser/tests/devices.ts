@@ -1,4 +1,3 @@
-import { Duplex, Pipe } from 'debugger-sh';
 import { expect, test } from 'vitest';
 
 import { eng, HELLO, withTool } from '../helpers';
@@ -15,7 +14,7 @@ function buffer(text: string): SharedArrayBuffer {
 
 test('processes read from pipes', async () => {
   const tool = await withTool();
-  const pipe = new Pipe();
+  const pipe = tool.devices.pipe();
   const proc = tool.run('/bin/main', ['read', '/dev/test'], { devices: { '/dev/test': pipe } });
   const result = expect(proc).outputs({ stdout: 'hello world!' });
   await pipe.write('hello world!');
@@ -25,7 +24,7 @@ test('processes read from pipes', async () => {
 
 test('processes write to pipes', async () => {
   const tool = await withTool();
-  const pipe = new Pipe();
+  const pipe = tool.devices.pipe();
   await tool.run('/bin/main', ['write', '/dev/test', 'from guest'], {
     devices: { '/dev/test': pipe }
   });
@@ -34,7 +33,7 @@ test('processes write to pipes', async () => {
 
 test('pipes are not reset between processes', async () => {
   const tool = await withTool();
-  const pipe = new Pipe({ close: false });
+  const pipe = tool.devices.pipe({ close: false });
   await tool.run('/bin/main', ['write', '/dev/test', 'kept'], { devices: { '/dev/test': pipe } });
   pipe.close();
   await expect(
@@ -112,7 +111,7 @@ test('python programs read devices', async () => {
 
 test('processes read from duplexes', async () => {
   const tool = await withTool();
-  const dup = new Duplex();
+  const dup = tool.devices.duplex();
   const proc = tool.run('/bin/main', ['read', '/dev/test'], { devices: { '/dev/test': dup } });
   const result = expect(proc).outputs({ stdout: 'from host' });
   await dup.write('from host');
@@ -122,7 +121,7 @@ test('processes read from duplexes', async () => {
 
 test('processes write to duplexes', async () => {
   const tool = await withTool();
-  const dup = new Duplex();
+  const dup = tool.devices.duplex();
   await dup.write('unread');
   await tool.run('/bin/main', ['write', '/dev/test', 'from guest'], {
     devices: { '/dev/test': dup }

@@ -1,7 +1,6 @@
-import { Pipe } from 'debugger-sh';
 import { expect, test } from 'vitest';
 
-import { sleep, withTool } from '../helpers';
+import { eng, sleep, withTool } from '../helpers';
 
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
@@ -12,20 +11,20 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 }
 
 test('reads what was written', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   await pipe.write('hello world!');
   expect(decode(await pipe.read())).toBe('hello world!');
 });
 
 test('reads wait for writes', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   const read = pipe.read();
   await pipe.write(new TextEncoder().encode('later'));
   expect(decode(await read)).toBe('later');
 });
 
 test('reads are empty once closed and drained', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   await pipe.write('last');
   expect(pipe.closed).toBe(false);
   pipe.close();
@@ -35,20 +34,20 @@ test('reads are empty once closed and drained', async () => {
 });
 
 test('writing to a closed pipe throws', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   pipe.close();
   await expect(pipe.write('x')).rejects.toThrow();
 });
 
 test('closing a pipe fails blocked writes', async () => {
-  const pipe = new Pipe({ capacity: 1 });
+  const pipe = (await eng()).devices.pipe({ capacity: 1 });
   const written = pipe.write('ab');
   pipe.close();
   await expect(written).rejects.toThrow();
 });
 
 test('writes larger than the capacity wait for reads', async () => {
-  const pipe = new Pipe({ capacity: 16 });
+  const pipe = (await eng()).devices.pipe({ capacity: 16 });
   const big = 'x'.repeat(1000);
   const written = pipe.write(big).then(() => pipe.close());
   expect((await collect(pipe)).map(decode).join('')).toBe(big);
@@ -56,7 +55,7 @@ test('writes larger than the capacity wait for reads', async () => {
 });
 
 test('a pipe buffers exactly its capacity', async () => {
-  const pipe = new Pipe({ capacity: 4 });
+  const pipe = (await eng()).devices.pipe({ capacity: 4 });
   await pipe.write('full'); // resolves without any reads
   const written = pipe.write('!');
   expect(decode(await pipe.read())).toBe('full');
@@ -65,7 +64,7 @@ test('a pipe buffers exactly its capacity', async () => {
 });
 
 test('a pipe with a capacity of 1 buffers 1 byte', async () => {
-  const pipe = new Pipe({ capacity: 1 });
+  const pipe = (await eng()).devices.pipe({ capacity: 1 });
   const written = pipe.write('ab');
   expect(decode(await pipe.read())).toBe('a');
   expect(decode(await pipe.read())).toBe('b');
@@ -73,21 +72,21 @@ test('a pipe with a capacity of 1 buffers 1 byte', async () => {
 });
 
 test('a pipe with a capacity of 0 starts closed', async () => {
-  const pipe = new Pipe({ capacity: 0 });
+  const pipe = (await eng()).devices.pipe({ capacity: 0 });
   expect(pipe.closed).toBe(true);
   await expect(pipe.write('a')).rejects.toThrow('closed');
   expect((await pipe.read()).length).toBe(0);
 });
 
 test('lines() yields each line without its newline', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   await pipe.write('a\nb\n\nc');
   pipe.close();
   expect(await collect(pipe.lines())).toEqual(['a', 'b', '', 'c']);
 });
 
 test('data and end fire when the pipe is read, and listening does not read', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   const events: string[] = [];
   pipe.on('data', (chunk) => events.push(decode(chunk)));
   pipe.on('end', () => events.push('end'));
@@ -101,7 +100,7 @@ test('data and end fire when the pipe is read, and listening does not read', asy
 });
 
 test('text decodes characters split across chunks', async () => {
-  const pipe = new Pipe({ capacity: 1 });
+  const pipe = (await eng()).devices.pipe({ capacity: 1 });
   const texts: string[] = [];
   pipe.on('text', (text) => texts.push(text));
   pipe.flow();
@@ -112,7 +111,7 @@ test('text decodes characters split across chunks', async () => {
 });
 
 test('flowing pipes are consumed without reads', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   let data = '';
   pipe.on('data', (chunk) => (data += decode(chunk)));
   const ended = new Promise<void>((resolve) => pipe.on('end', () => resolve()));
@@ -124,7 +123,7 @@ test('flowing pipes are consumed without reads', async () => {
 });
 
 test('reads of a flowing pipe resolve with the next chunk', async () => {
-  const pipe = new Pipe();
+  const pipe = (await eng()).devices.pipe();
   pipe.flow();
   const reads = [pipe.read(), pipe.read()];
   await pipe.write('next');
@@ -139,28 +138,28 @@ test('reads of a flowing pipe resolve with the next chunk', async () => {
 
 test('stdout and stderr can be pipes', async () => {
   const tool = await withTool();
-  const [stdout, stderr] = [new Pipe(), new Pipe()];
+  const [stdout, stderr] = [tool.devices.pipe(), tool.devices.pipe()];
   const proc = tool.run('/bin/main', ['args', 'a', 'b'], { stdout, stderr });
   expect(proc.stdout).toBe(stdout);
   expect(proc.stderr).toBe(stderr);
   await proc;
   expect(await collect(stdout.lines())).toEqual(['a', 'b']);
 
-  const errors = new Pipe();
+  const errors = tool.devices.pipe();
   await tool.run('/bin/main', ['stderr'], { stderr: errors });
   expect(await collect(errors.lines())).toEqual(['oops']);
 });
 
 test('pipes given to a process are closed once it exits', async () => {
   const tool = await withTool();
-  const [stdin, stdout, device] = [new Pipe(), new Pipe(), new Pipe()];
+  const [stdin, stdout, device] = [tool.devices.pipe(), tool.devices.pipe(), tool.devices.pipe()];
   await tool.run('/bin/main', ['exit', '1'], { stdin, stdout, devices: { '/dev/test': device } });
   expect([stdin.closed, stdout.closed, device.closed]).toEqual([true, true, true]);
 });
 
 test('pipes given to a killed process are closed', async () => {
   const tool = await withTool();
-  const stdout = new Pipe();
+  const stdout = tool.devices.pipe();
   const proc = tool.run('/bin/main', ['loop'], { stdout });
   await sleep(200);
   proc.kill();
@@ -170,7 +169,7 @@ test('pipes given to a killed process are closed', async () => {
 
 test('closing a full stdout unblocks the process writing to it', async () => {
   const tool = await withTool();
-  const stdout = new Pipe({ capacity: 1 });
+  const stdout = tool.devices.pipe({ capacity: 1 });
   const proc = tool.run('/bin/main', ['args', 'blocked'], { stdout });
   await sleep(200);
   stdout.close();
@@ -179,7 +178,7 @@ test('closing a full stdout unblocks the process writing to it', async () => {
 
 test('pipes created with close: false are left open', async () => {
   const tool = await withTool();
-  const stdout = new Pipe({ close: false });
+  const stdout = tool.devices.pipe({ close: false });
   await tool.run('/bin/main', ['args', 'first'], { stdout });
   await tool.run('/bin/main', ['args', 'second'], { stdout });
   expect(stdout.closed).toBe(false);
@@ -189,7 +188,7 @@ test('pipes created with close: false are left open', async () => {
 
 test('awaiting a process drains the flowing pipes given to it', async () => {
   const tool = await withTool();
-  const stdout = new Pipe();
+  const stdout = tool.devices.pipe();
   let data = '';
   stdout.on('data', (chunk) => (data += decode(chunk)));
   stdout.flow();
@@ -199,7 +198,7 @@ test('awaiting a process drains the flowing pipes given to it', async () => {
 
 test('stdin can be a pipe', async () => {
   const tool = await withTool();
-  const stdin = new Pipe();
+  const stdin = tool.devices.pipe();
   await stdin.write('input');
   stdin.close();
   await expect(tool.run('/bin/main', ['cat'], { stdin })).outputs({ stdout: 'input' });
@@ -207,7 +206,7 @@ test('stdin can be a pipe', async () => {
 
 test('pipes connect processes', async () => {
   const tool = await withTool();
-  const pipe = new Pipe();
+  const pipe = tool.devices.pipe();
   const first = tool.run('/bin/main', ['args', 'piped'], { stdout: pipe });
   const second = tool.run('/bin/main', ['cat'], { stdin: pipe });
   await expect(second).outputs({ stdout: 'piped\n' }); // `first` closes the pipe as it exits
@@ -226,7 +225,7 @@ test('the default stdout and stderr are closed once the process exits', async ()
 test('output larger than the default stdout is drained', async () => {
   const tool = await withTool();
   const big = 'y'.repeat(100_000);
-  const stdin = new Pipe();
+  const stdin = tool.devices.pipe();
   const proc = tool.run('/bin/main', ['cat'], { stdin });
   const result = expect(proc).outputs({ stdout: big });
   await stdin.write(big);

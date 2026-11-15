@@ -468,7 +468,7 @@ Each process object provides the `stdin`, `stdout`, and `stderr` objects, which 
 console.log(engine.run('cpp').stdin.closed); // true: stdin is closed by default
 
 /** For interactive input, pass a new pipe as stdin */
-const stdin = new Pipe();
+const stdin = engine.devices.pipe();
 const proc = engine.run('cpp', { stdin });
 console.log(proc.stdin.closed); // false
 
