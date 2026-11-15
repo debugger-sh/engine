@@ -218,7 +218,8 @@ impl VirtualFile for PipeDevice {
         0
     }
     fn size(&self) -> u64 {
-        0
+        let len = self.data.length();
+        ((self.load(WRITE_IDX) + len - self.load(READ_IDX)) % len) as u64
     }
     fn set_len(&mut self, _new_size: u64) -> Result<()> {
         Ok(())
@@ -229,8 +230,9 @@ impl VirtualFile for PipeDevice {
     fn get_special_fd(&self) -> Option<u32> {
         self.fd
     }
+    /// Never pending: nothing would wake the blocked thread.
     fn poll_read_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
-        Poll::Ready(Ok(0))
+        Poll::Ready(Ok(self.size() as usize))
     }
     fn poll_write_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         Poll::Ready(Ok(self.free() as usize))

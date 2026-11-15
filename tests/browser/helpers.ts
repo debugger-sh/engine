@@ -48,6 +48,8 @@ const TOOL = `
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 
 int main(int argc, char** argv) {
@@ -63,6 +65,7 @@ int main(int argc, char** argv) {
   if (!strcmp(mode, "spam")) for (;;) { FILE* f = fopen(argv[2], "w"); fputs("spam", f); fclose(f); printf("."); }
   if (!strcmp(mode, "read")) { char b[256] = {0}; FILE* f = fopen(argv[2], "r"); fread(b, 1, 255, f); printf("%s", b); }
   if (!strcmp(mode, "size")) { struct stat s; printf("%d\\n", stat(argv[2], &s) ? -1 : (int)s.st_size); }
+  if (!strcmp(mode, "available")) { int n = -1; ioctl(open(argv[2], O_RDONLY), FIONREAD, &n); printf("%d\\n", n); }
   return 0;
 }
 `;

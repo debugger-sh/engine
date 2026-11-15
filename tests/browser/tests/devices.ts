@@ -32,6 +32,22 @@ test('processes write to pipes', async () => {
   expect(decode(await pipe.read())).toBe('from guest');
 });
 
+test('processes check pipes for input without blocking', async () => {
+  const tool = await withTool();
+  const pipe = new Pipe({ close: false });
+  const devices = { '/dev/test': pipe };
+  await expect(tool.run('/bin/main', ['available', '/dev/test'], { devices })).outputs({
+    stdout: '0\n'
+  });
+  await pipe.write('hello');
+  await expect(tool.run('/bin/main', ['available', '/dev/test'], { devices })).outputs({
+    stdout: '5\n'
+  });
+  await expect(tool.run('/bin/main', ['size', '/dev/test'], { devices })).outputs({
+    stdout: '5\n'
+  });
+});
+
 test('pipes are not reset between processes', async () => {
   const tool = await withTool();
   const pipe = new Pipe({ close: false });
