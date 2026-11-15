@@ -93,6 +93,9 @@ export interface RunOptions {
    * Note: {@link Pipe} objects passed here will automatically close when this
    * process exits for any reason, unless {@link PipeOptions.close} is set to `false`.
    *
+   * For bidirectional communication, use {@link Duplex} for a device that simultaneously allows
+   * writing data to a process and reading from it.
+   *
    * ```ts
    * const pipe = new Pipe();
    * const proc = engine.run("python", ["-c", "open('/dev/out', 'w').write('hello')"], {

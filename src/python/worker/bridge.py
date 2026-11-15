@@ -1,9 +1,8 @@
 import bdb, json, os, sys
 
-# Pipes to and from the main thread (see `Debugger` in `src/ts/debugger.ts`), which carry
-# one JSON message per line: commands (from `debug.rs`) and pause snapshots.
-COMMANDS = '/__debug__/commands'
-PAUSES = '/__debug__/pauses'
+# A duplex with the main thread (see `Debugger` in `src/ts/debugger.ts`), which carries one
+# JSON message per line: commands in (from `debug.rs`), and pause snapshots out.
+DEVICE = '/__debug__'
 
 # Resume commands from the main thread. Must match PYTHON_CMD_* in debug.rs.
 CONTINUE   = 0
@@ -94,8 +93,8 @@ def mapping_pairs(mapping):
 class DapBridge(bdb.Bdb):
     def __init__(self):
         super().__init__()
-        self._commands = open(COMMANDS, 'rb')
-        self._pauses = open(PAUSES, 'wb')
+        self._commands = open(DEVICE, 'rb')
+        self._pauses = open(DEVICE, 'wb')
         self._stepping = False
         self._nodes = 0
 
