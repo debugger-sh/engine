@@ -33,7 +33,7 @@ type Device = Pipe | SharedArrayBuffer;
 A pipe is a one-way communication interface that behaves in exactly the same way as `stdin` currently does. It is a buffered byte-stream built on top of a circular buffer which can be written to and read from indiscriminately. For example:
 
 ```ts
-const pipe = engine.devices.pipe();
+const pipe = new Pipe();
 const proc = engine.run('cmd', {
   devices: { '/dev/test': pipe }
 });
@@ -158,7 +158,7 @@ interface BaseOptions {
 so that processes I/O can be wired together like so:
 
 ```ts
-const pipe = engine.devices.pipe();
+const pipe = new Pipe();
 const p1 = engine.run('cmd1', { stdout: pipe });
 const p2 = engine.run('cmd2', { stdin: pipe });
 ```

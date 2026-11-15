@@ -249,7 +249,7 @@ export interface PipeOptions {
 
   /**
    * When `true`, this pipe will automatically be closed by any process using it
-   * as soon as that process exits.
+   * as soon as that process finishes running.
    *
    * If set to `false`, the pipe will be kept open to allow for additional writes.
    * In this case, it is the responsibility of the pipe's creator to manually close it
@@ -286,7 +286,7 @@ const encoder = new TextEncoder();
  * snippet shows how a Python program waits until data is written to a pipe:
  *
  * ```ts
- * const pipe = engine.devices.pipe();
+ * const pipe = new Pipe();
  * await engine.fs.writeFile("main.py", 'print(open("/dev/in").read())');
  *
  * const proc = engine.run("python", { devices: { "/dev/in": pipe } });
@@ -458,7 +458,7 @@ export class Pipe extends EventEmitter<ReadableEventsMap> implements Readable, W
  * Closing the duplex via {@link Duplex.close} closes both pipes.
  *
  * ```ts
- * const dup = engine.devices.duplex();
+ * const dup = new Duplex();
  * const proc = engine.run("python", { devices: { "/dev/host": dup } });
  * await dup.write("ping\n");
  * console.log(await dup.read());

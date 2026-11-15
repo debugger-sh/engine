@@ -51,7 +51,7 @@ proc.stderr.off('data', onOut);
 **stdin** is closed by default, so programs read end-of-file. For interactive input, create a pipe and pass it to `run`. It exposes `write(value: string | Uint8Array)` (UTF-8 for strings), and `close()` to signal end-of-file:
 
 ```ts
-const stdin = engine.devices.pipe();
+const stdin = new Pipe();
 const proc = engine.run('cpp', { stdin });
 await stdin.write('hello\n');
 await stdin.write(new TextEncoder().encode('hello\n'));

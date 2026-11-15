@@ -159,7 +159,9 @@ proc.stdin.close();
 // │ Pipes                                                       │
 // ╰─────────────────────────────────────────────────────────────╯
 
-const pipe = engine.devices.pipe();
+import { Pipe } from 'debugger-sh';
+
+const pipe = new Pipe();
 const p1 = engine.run("python", ["producer.py"], { stdout: pipe });
 const p2 = engine.run("python", ["consumer.py"], { stdin: pipe });
 
@@ -168,8 +170,8 @@ const p2 = engine.run("python", ["consumer.py"], { stdin: pipe });
 // │ Devices                                                     │
 // ╰─────────────────────────────────────────────────────────────╯
 
-const input = engine.devices.pipe();
-const output = engine.devices.pipe();
+const input = new Pipe();
+const output = new Pipe()
 
 await engine.fs.writeFile('main.py', `
   data = open('/dev/in').read()

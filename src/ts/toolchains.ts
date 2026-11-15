@@ -97,7 +97,7 @@ export interface RunOptions {
    * writing data to a process and reading from it.
    *
    * ```ts
-   * const pipe = engine.devices.pipe();
+   * const pipe = new Pipe();
    * const proc = engine.run("python", ["-c", "open('/dev/out', 'w').write('hello')"], {
    *   devices: { "/dev/out": pipe }
    * });
@@ -136,7 +136,7 @@ export interface RunOptions {
    * For interactive input, pass `true` here, or create a pipe and write to it as the process runs:
    *
    * ```ts
-   * const stdin = engine.devices.pipe();
+   * const stdin = new Pipe();
    * const proc = engine.run("python", { stdin });
    * await stdin.write("input\n");
    * stdin.close();

@@ -2,15 +2,7 @@ import init, { Fs, type InitOutput } from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
 import { Filesystem } from './fs';
-import {
-  Duplex,
-  Pipe,
-  type PipeOptions,
-  Pool,
-  Process,
-  type Stdio,
-  type WorkerMessage
-} from './process';
+import { Duplex, Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
 import {
   commands,
   type Context,
@@ -103,16 +95,6 @@ export interface EngineOptions {
 export class Engine {
   /** The in-memory filesystem shared by all processes */
   public readonly fs: Filesystem;
-
-  /**
-   * Use this interface for creating devices (see {@link RunOptions.devices}).
-   */
-  public readonly devices = {
-    /** Creates a {@link Pipe} for one-way communication with a process. */
-    pipe: (options?: PipeOptions) => new Pipe(options),
-    /** Creates a {@link Duplex} for two-way communication with a process. */
-    duplex: (options?: PipeOptions) => new Duplex(options)
-  };
 
   readonly #pool: Pool;
   readonly #processes = new Set<Process>();
@@ -425,16 +407,9 @@ export type {
   Timestamps
 } from './fs';
 export type { Filesystem } from './fs';
-export type {
-  Device,
-  Duplex,
-  Pipe,
-  PipeOptions,
-  ProcessResult,
-  Readable,
-  Writable
-} from './process';
+export type { Device, PipeOptions, ProcessResult, Readable, Writable } from './process';
 export type { Process } from './process';
+export { Duplex, Pipe } from './process';
 export type {
   RunOptions,
   CppOptions,
