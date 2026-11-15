@@ -170,24 +170,18 @@ const p2 = engine.run("python", ["consumer.py"], { stdin: pipe });
 // │ Devices                                                     │
 // ╰─────────────────────────────────────────────────────────────╯
 
-const input = new Pipe();
-const output = new Pipe()
+import { Duplex } from 'debugger-sh';
+
+const duplex = new Duplex();
+duplex.on("data", () => host.write("Brutus\n"));
+duplex.from.flow();
 
 await engine.fs.writeFile('main.py', `
-  data = open('/dev/in').read()
-  open('/dev/out', 'w').write(data)
+  open('/dev/host', 'w').write('name?')
+  print('Et tu,', open('/dev/host').readline())
 `);
 
-output.on("text", console.log);
-await input.write("I put a spell on you");
-input.close();
-
-await engine.run("python", ["main.py"], {
-  devices: {
-    "/dev/in": input,
-    "/dev/out": output
-  }
-});
+await engine.run("python", ["main.py"], { devices: { "/dev/host": duplex } });
 ```
 
 ## Running Locally
