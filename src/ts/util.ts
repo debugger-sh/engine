@@ -1,5 +1,3 @@
-import { type RunResult } from '.';
-
 /**
  * An exported symbol that allows us to define properties
  * on objects that are only available by library code and not consumers
@@ -7,15 +5,24 @@ import { type RunResult } from '.';
  */
 export const Internals: unique symbol = Symbol();
 
-export function errorResult(err: unknown): RunResult {
-  if (err instanceof Error) {
-    return {
-      type: 'error',
-      error: { type: err.constructor.name, message: err.message }
-    };
+/** Rejects construction from outside of the library, which passes {@link Internals} as `key`. */
+export function internal(key: unknown): void {
+  if (key !== Internals) throw new TypeError('Illegal constructor');
+}
+
+/** Yields to the event loop. */
+export const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+/** Joins path segments, resolving relative paths against `/`. */
+export function join(...parts: string[]): string {
+  const out: string[] = [];
+  for (const part of parts.join('/').split('/')) {
+    if (part === '..') out.pop();
+    else if (part && part !== '.') out.push(part);
   }
-  return {
-    type: 'error',
-    error: { type: typeof err, message: String(err) }
-  };
+  return '/' + out.join('/');
+}
+
+export function dirname(path: string): string {
+  return join(path, '..');
 }

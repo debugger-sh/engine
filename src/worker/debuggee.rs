@@ -180,11 +180,7 @@ impl Debuggee {
         self.last_sp = sp;
         js_sys::Atomics::store(&self.state, 0, sp).unwrap();
 
-        WorkerOut::Paused {
-            reason: Some(reason),
-            frame: None,
-        }
-        .send();
+        WorkerOut::Paused { reason }.send();
         self.wait_for_resume();
         true
     }

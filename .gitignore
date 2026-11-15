@@ -47,3 +47,7 @@ local/
 # Added by cargo
 
 /target
+
+# vitest cache
+node_modules/
+.vitest/

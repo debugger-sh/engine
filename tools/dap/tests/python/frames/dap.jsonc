@@ -39,14 +39,13 @@
     {
       "type": "response",
       "body": {
-        "stackFrames": {
-          "$array.contains": [
-            { "name": "level3", "id": "${{frame3}}" },
-            { "name": "level2", "id": "${{frame2}}" },
-            { "name": "level1", "id": "${{frame1}}" },
-            { "name": "main", "id": "${{frame0}}" }
-          ]
-        }
+        "stackFrames": [
+          { "name": "level3", "id": "${{frame3}}" },
+          { "name": "level2", "id": "${{frame2}}" },
+          { "name": "level1", "id": "${{frame1}}" },
+          { "name": "main", "id": "${{frame0}}" },
+          { "name": "__main__" }
+        ]
       }
     },
     {

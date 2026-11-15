@@ -7,7 +7,7 @@ Use this tool to run end-to-end Debugger Adapter Protocol (DAP) integration test
 - The harness links the local package into `tools/dap` before running tests.
 - It executes scripted DAP request/response/event flows from any `tools/dap/tests/**/dap.jsonc` against a real engine session (JSON with comments: `//` and `/* */`).
 - Tests can be nested (e.g. `tests/formatting/vector/`); a CLI name like `formatting` runs every test under that prefix.
-- For triage, per-test artifacts/log outputs are written to `tools/dap/output/<test-path>/`, including emitted WASM files (`pre.wasm`, `post.wasm`) and derived dumps like `pre.wat`/`post.wat` (and `pre.dwarf` when `llvm-dwarfdump` is available).
+- For triage, the request/response/event stream is written to `tools/dap/output/<test-path>/log.json`.
 - The command prints step-by-step progress and mismatch details to stdout, and exits non-zero on failures.
 
 ## Test Cases
@@ -98,7 +98,7 @@ How it works:
 - The harness compiles each test's `main.{cpp,c,cc}` to a native binary at `tools/dap/output/<test>/lldb/prog` using `xcrun clang++ -g -O0 -fno-inline -fstandalone-debug` (or `clang` for `.c`).
 - It spawns `lldb-dap` over stdio with standard `Content-Length`-framed DAP, auto-injects a `launch` request after `initialize`, then runs your scenario steps unchanged.
 - Outgoing `source.path: "/main.cpp"` (the engine's virtualized path) is rewritten to the absolute path of the on-disk source so `setBreakpoints` resolves correctly.
-- `--lldb` mode is **exploratory**: mismatches are printed in the same diff format as engine mode, but the process always exits 0. The full request/response/event stream lands in `tools/dap/output/<test>/log.json` regardless of pass/fail — that's the artifact you read to see what lldb-dap actually returned.
+- `--lldb` mode is **exploratory**: mismatches are printed in the same diff format as engine mode, but the process always exits 0. The full request/response/event stream lands in `tools/dap/output/<test>/log.json` regardless of pass/fail — that's the log you read to see what lldb-dap actually returned.
 
 Adapter discovery order:
 

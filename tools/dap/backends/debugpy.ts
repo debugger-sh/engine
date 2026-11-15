@@ -1,3 +1,4 @@
+import type { DebugProtocol } from '@vscode/debugprotocol';
 import { $ } from 'bun';
 import chalk from 'chalk';
 import { existsSync } from 'node:fs';
@@ -6,7 +7,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
-import type { Backend, BackendOptions, Json } from '../run';
+import type { Backend, BackendOptions } from '../run';
+
+/** A message from the adapter: a response, an event or a (reverse) request. */
+type Message = DebugProtocol.Request | DebugProtocol.Response | DebugProtocol.Event;
 
 export async function createDebugpyBackend(opts: BackendOptions): Promise<Backend> {
   const python = await detectPython();
@@ -19,22 +23,23 @@ export async function createDebugpyBackend(opts: BackendOptions): Promise<Backen
     stderr: 'pipe'
   });
 
-  const eventListeners: ((e: Json) => void)[] = [];
-  const pending = new Map<number, { resolve: (v: Json) => void; reject: (e: Error) => void }>();
+  const eventListeners: ((e: DebugProtocol.Event) => void)[] = [];
+  const pending = new Map<
+    number,
+    { resolve: (v: DebugProtocol.Response) => void; reject: (e: Error) => void }
+  >();
 
-  const dispatch = (msg: Json) => {
-    if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
-    const m = msg as { type?: string; request_seq?: number; event?: string; body?: Json };
-    if (m.type === 'response' && typeof m.request_seq === 'number') {
-      const p = pending.get(m.request_seq);
+  const dispatch = (msg: Message) => {
+    if ('request_seq' in msg) {
+      const p = pending.get(msg.request_seq);
       if (p) {
-        pending.delete(m.request_seq);
+        pending.delete(msg.request_seq);
         p.resolve(msg);
       }
       return;
     }
-    if (m.type === 'event') {
-      handleOutputEvent(m);
+    if ('event' in msg) {
+      handleOutputEvent(msg);
       for (const cb of eventListeners) cb(msg);
     }
   };
@@ -47,16 +52,9 @@ export async function createDebugpyBackend(opts: BackendOptions): Promise<Backen
 
   void drainStderr(proc.stderr);
 
-  function send(req: Json): Promise<Json> {
-    if (!req || typeof req !== 'object' || Array.isArray(req)) {
-      return Promise.reject(new Error('debugpy backend send: not an object'));
-    }
-    const msg = rewriteSourcePath(
-      req as { seq?: number; type?: string; command?: string; arguments?: Json },
-      scriptBasename,
-      scriptAbs
-    );
-    if (msg.type === 'request' && msg.command === 'launch') {
+  function send(request: DebugProtocol.Request): Promise<DebugProtocol.Response> {
+    const msg = rewriteSourcePath(request, scriptBasename, scriptAbs);
+    if (msg.command === 'launch') {
       msg.arguments = {
         program: scriptAbs,
         cwd: path.dirname(scriptAbs),
@@ -71,18 +69,14 @@ export async function createDebugpyBackend(opts: BackendOptions): Promise<Backen
         request_seq: msg.seq,
         success: true,
         command: 'launch'
-      } as Json);
+      });
     }
-    const seq = msg.seq;
-    if (typeof seq !== 'number') {
-      return Promise.reject(new Error('debugpy backend send: missing seq'));
-    }
-    return new Promise<Json>((resolve, reject) => {
-      pending.set(seq, { resolve, reject });
+    return new Promise((resolve, reject) => {
+      pending.set(msg.seq, { resolve, reject });
       try {
         writeFrame(proc.stdin, msg);
       } catch (err) {
-        pending.delete(seq);
+        pending.delete(msg.seq);
         reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
@@ -101,7 +95,7 @@ export async function createDebugpyBackend(opts: BackendOptions): Promise<Backen
             seq: 0xffff_ffff,
             command: 'disconnect',
             arguments: { terminateDebuggee: true }
-          } as Json),
+          }),
           new Promise((resolve) => setTimeout(resolve, 250))
         ]);
       } catch {
@@ -154,16 +148,16 @@ async function prepareScript(
   throw new Error(`no Python entrypoint found in ${testDir} (looked for main.py, app.py)`);
 }
 
-function rewriteSourcePath<T extends { arguments?: Json }>(
-  req: T,
+function rewriteSourcePath(
+  req: DebugProtocol.Request,
   basename: string,
   absolutePath: string
-): T {
-  const walk = (v: Json): Json => {
+): DebugProtocol.Request {
+  const walk = (v: unknown): unknown => {
     if (Array.isArray(v)) return v.map(walk);
     if (v && typeof v === 'object') {
-      const out: Record<string, Json> = {};
-      for (const [k, val] of Object.entries(v)) out[k] = walk(val as Json);
+      const out: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v)) out[k] = walk(val);
       if (
         typeof out.path === 'string' &&
         (out.path === basename || out.path.endsWith(`/${basename}`))
@@ -178,7 +172,10 @@ function rewriteSourcePath<T extends { arguments?: Json }>(
   return { ...req, arguments: walk(req.arguments) };
 }
 
-function writeFrame(stdin: { write(data: string): unknown; flush(): unknown }, msg: Json) {
+function writeFrame(
+  stdin: { write(data: string): unknown; flush(): unknown },
+  msg: DebugProtocol.ProtocolMessage
+) {
   const body = JSON.stringify(msg);
   const header = `Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n`;
   stdin.write(header);
@@ -186,7 +183,7 @@ function writeFrame(stdin: { write(data: string): unknown; flush(): unknown }, m
   stdin.flush();
 }
 
-async function readLoop(stdout: ReadableStream<Uint8Array>, dispatch: (msg: Json) => void) {
+async function readLoop(stdout: ReadableStream<Uint8Array>, dispatch: (msg: Message) => void) {
   const reader = stdout.getReader();
   const decoder = new TextDecoder();
   let buffer = new Uint8Array(0);
@@ -211,7 +208,7 @@ async function readLoop(stdout: ReadableStream<Uint8Array>, dispatch: (msg: Json
       if (buffer.length < start + length) break;
       const body = decoder.decode(buffer.slice(start, start + length));
       buffer = buffer.slice(start + length);
-      dispatch(JSON.parse(body) as Json);
+      dispatch(JSON.parse(body));
     }
   }
 }
@@ -228,13 +225,8 @@ async function drainStderr(stderr: ReadableStream<Uint8Array>) {
   }
 }
 
-function handleOutputEvent(msg: { event?: string; body?: Json }) {
-  if (msg.event !== 'output') return;
-  const body = msg.body;
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return;
-  const out = (body as Record<string, Json>).output;
-  if (typeof out !== 'string') return;
-  process.stdout.write(chalk.gray(out));
+function handleOutputEvent({ event, body }: DebugProtocol.Event) {
+  if (event === 'output') process.stdout.write(chalk.gray(body.output));
 }
 
 function concatU8(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {

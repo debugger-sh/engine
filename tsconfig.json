@@ -10,7 +10,8 @@
     "outDir": "dist",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["vite/client", "node"]
+    "types": ["vite/client", "node"],
+    "stripInternal": true
   },
   "include": ["src"]
 }

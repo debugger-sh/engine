@@ -36,11 +36,6 @@ impl DapSession {
         self.debugger = Some(debugger);
     }
 
-    pub fn reset_run(&mut self) {
-        self.debugger = None;
-        self.initialized_emitted = false;
-    }
-
     pub fn debugger_mut(&mut self) -> Option<&mut (dyn DapDebugger + '_)> {
         match self.debugger.as_mut() {
             Some(d) => Some(d.as_mut()),
