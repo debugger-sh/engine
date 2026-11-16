@@ -135,7 +135,9 @@ impl Instrumenter {
             functions: parse_debug_functions(&info.dwarf),
             locations: Vec::new(),
             info,
-            validator: wasmparser::Validator::new(),
+            validator: wasmparser::Validator::new_with_features(
+                wasmparser::WasmFeatures::default() | wasmparser::WasmFeatures::LEGACY_EXCEPTIONS,
+            ),
             bkpt_type_index: 0,
             bkpt_fn_index: 0,
             stack_mem_index,
@@ -244,6 +246,17 @@ impl reencode::Reencode for Instrumenter {
             .global_section(&section)
             .map_err(reencode::Error::from)?;
         reencode::utils::parse_global_section(self, globals, section)
+    }
+
+    fn parse_tag_section(
+        &mut self,
+        tags: &mut wasm_encoder::TagSection,
+        section: wasmparser::TagSectionReader<'_>,
+    ) -> InstrResult {
+        self.validator
+            .tag_section(&section)
+            .map_err(reencode::Error::from)?;
+        reencode::utils::parse_tag_section(self, tags, section)
     }
 
     fn parse_memory_section(

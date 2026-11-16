@@ -349,6 +349,8 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
       '-isysroot', '/', '-internal-isystem', '/include/c++/v1', '-internal-isystem', '/include',
       '-internal-isystem', '/include/wasm32-wasip1', '-ferror-limit', '4', '-fcolor-diagnostics',
       '-x', 'c++', '-std=c++23', '-O0', '-debug-info-kind=standalone', '-dwarf-version=5',
+      '-fcxx-exceptions', '-fexceptions', '-exception-model=wasm', '-target-feature',
+      '+exception-handling', '-mllvm', '-wasm-enable-eh', '-mllvm', '-wasm-use-legacy-eh=true',
       '-dependency-file', dep, '-MT', obj, ...cxxFlags, '-o', obj, source
     ];
     const command = JSON.stringify(args);
@@ -365,7 +367,7 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
   // prettier-ignore
   const linked = await ctx.run('lld', [
     '--export-dynamic', '-z', 'stack-size=1048576', '-L/lib/wasm32-wasip1', '/lib/wasm32-wasip1/crt1.o',
-    ...files.map(object), '-lc++', '-lc++abi', '/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a', '-lc',
+    ...files.map(object), '-lc++', '-lc++abi', '-lunwind', '/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a', '-lc',
     ...lldFlags, '-o', main
   ], { sysroot });
   if (linked) return linked;

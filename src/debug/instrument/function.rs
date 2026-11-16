@@ -63,6 +63,11 @@ pub struct FnInstrumenter<'a, 'b> {
     /// (parameters + additional locals), then each of these will have local
     /// indices `N, N+1, ...`.
     scratch_locals: Vec<wasmparser::ValType>,
+
+    /// For a function that catches exceptions, a local (before the scratch locals) that keeps
+    /// the value of the debug stack pointer on entry to the function. This value is restored
+    /// upon an exception being caught (since stack frames might be unwound).
+    frame_local: Option<u32>,
 }
 
 impl<'a, 'b> FnInstrumenter<'a, 'b> {
@@ -79,6 +84,13 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
 
         validator.read_locals(&mut func_body.get_binary_reader())?;
 
+        let catches = func_body
+            .get_operators_reader()
+            .map_err(reencode::Error::from)?
+            .into_iter()
+            .any(|op| matches!(op, Ok(wasmparser::Operator::Try { .. })));
+        let frame_local = catches.then(|| validator.len_locals());
+
         Ok(Self {
             instr,
             func_idx,
@@ -88,6 +100,7 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
             instructions: Vec::default(),
             stack_intructions: Vec::default(),
             scratch_locals: Vec::default(),
+            frame_local,
         })
     }
 
@@ -114,6 +127,12 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
             Instruction::GlobalSet(self.instr.sp_gl_index),
         ]);
         self.stack_intructions.push(instr_count + 1);
+        if let Some(local) = self.frame_local {
+            self.instructions.extend([
+                Instruction::GlobalGet(self.instr.sp_gl_index),
+                Instruction::LocalSet(local),
+            ]);
+        }
     }
 
     fn emit_footer(&mut self) {
@@ -231,7 +250,8 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
             return Ok(());
         }
 
-        let nlocals = self.validator.len_locals() as usize;
+        let nlocals =
+            self.validator.len_locals() as usize + usize::from(self.frame_local.is_some());
 
         // `scratch_indices` contains the indices in `self.scratch_locals`
         // which have been consumed to store operands while unrolling the operand stack.
@@ -422,6 +442,15 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
                     self.emit_footer();
                     self.emit_op(wasmparser::Operator::Return)?;
                 }
+                wasmparser::Operator::Catch { .. } | wasmparser::Operator::CatchAll => {
+                    self.emit_op(op)?;
+                    if let Some(local) = self.frame_local {
+                        self.instructions.extend([
+                            Instruction::LocalGet(local),
+                            Instruction::GlobalSet(self.instr.sp_gl_index),
+                        ]);
+                    }
+                }
                 wasmparser::Operator::End => {
                     if reader.eof() {
                         self.emit_footer();
@@ -453,6 +482,9 @@ impl<'a, 'b> FnInstrumenter<'a, 'b> {
         {
             let (cnt, ty) = pair.map_err(reencode::Error::from)?;
             locals.push((cnt, self.instr.val_type(ty)?));
+        }
+        if self.frame_local.is_some() {
+            locals.push((1, wasm_encoder::ValType::I32));
         }
         for &ty in &self.scratch_locals {
             locals.push((1, self.instr.val_type(ty)?));
