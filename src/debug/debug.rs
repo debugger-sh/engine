@@ -205,6 +205,17 @@ impl Debugger {
         Some(loc)
     }
 
+    /// Clears every breakpoint set in `file`.
+    pub fn clear_breakpoints(&self, file: &str) {
+        let flags = self.info.get_bp_flags();
+        let target = std::path::Path::new("/").join(file);
+        for (index, location) in self.info.locations.iter().enumerate() {
+            if *self.info.dwarf.file_at(location.file_index) == target {
+                flags.set_index(index as u32, 0);
+            }
+        }
+    }
+
     /// Walks the debug stack to find the offset of the Nth stack frame
     fn frame_offset_at(&self, frame_id: u32) -> Option<u32> {
         let (view, sp, stack_top) = self.stack_view();
@@ -426,38 +437,60 @@ impl EvaluationContext {
         let encoding = die.ctx().unit.encoding();
         let mut eval = expr.evaluation(encoding);
 
+        let mut result = eval.evaluate()?;
         loop {
-            let result = eval.evaluate()?;
-            match result {
+            result = match result {
                 gimli::EvaluationResult::Complete => return Ok(eval.result()),
-                gimli::EvaluationResult::RequiresWasmLocal { index } => {
-                    eval.resume_with_wasm_value(
+                gimli::EvaluationResult::RequiresWasmLocal { index } => eval
+                    .resume_with_wasm_value(
                         self.wasm_value(func, &WasmLocation::Local(index as usize))?,
-                    )?;
-                }
-                gimli::EvaluationResult::RequiresWasmStack { index } => {
-                    eval.resume_with_wasm_value(
+                    )?,
+                gimli::EvaluationResult::RequiresWasmStack { index } => eval
+                    .resume_with_wasm_value(
                         self.wasm_value(func, &WasmLocation::Operand(index as usize))?,
-                    )?;
-                }
-                gimli::EvaluationResult::RequiresWasmGlobal { index } => {
-                    eval.resume_with_wasm_value(
-                        self.wasm_value(func, &WasmLocation::Operand(index as usize))?,
-                    )?;
-                }
+                    )?,
+                gimli::EvaluationResult::RequiresWasmGlobal { index } => eval
+                    .resume_with_wasm_value(
+                        self.wasm_value(func, &WasmLocation::Global(index as usize))?,
+                    )?,
                 gimli::EvaluationResult::RequiresFrameBase => {
-                    if let Some(fb) = self.fb.get() {
-                        eval.resume_with_frame_base(*fb)?;
+                    let fb = if let Some(&fb) = self.fb.get() {
+                        fb
                     } else {
                         let expr = die
                             .expression(gimli::DW_AT_frame_base, pc)
                             .context("Required DW_AT_frame_base missing on function")?;
                         let fb = self.evaluate_unsigned(expr)?;
-                        eval.resume_with_frame_base(*self.fb.get_or_init(|| fb))?;
-                    }
+                        *self.fb.get_or_init(|| fb)
+                    };
+                    eval.resume_with_frame_base(fb)?
                 }
-                _ => anyhow::bail!("Could not execute evaluation step {result:?}"),
-            }
+                gimli::EvaluationResult::RequiresRelocatedAddress(address) => {
+                    eval.resume_with_relocated_address(address)?
+                }
+                gimli::EvaluationResult::RequiresMemory {
+                    address,
+                    size,
+                    space: _,
+                    base_type: _,
+                } => {
+                    let debugger = self
+                        .debugger
+                        .as_deref()
+                        .context("Cannot read memory without debugger")?;
+                    let size = usize::from(size);
+                    anyhow::ensure!(
+                        (1..=8).contains(&size),
+                        "Unsupported DWARF memory read size {size}"
+                    );
+                    let bytes = debugger.memory().read(address.into(), size);
+                    let mut raw = [0u8; 8];
+                    raw[..size].copy_from_slice(&bytes[..size]);
+                    let value = u64::from_le_bytes(raw);
+                    eval.resume_with_memory(gimli::Value::Generic(value))?
+                }
+                other => anyhow::bail!("Could not execute evaluation step {other:?}"),
+            };
         }
     }
 

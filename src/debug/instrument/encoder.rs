@@ -77,11 +77,11 @@ fn parse_debug_functions(dwarf: &Dwarf) -> Vec<DebugFunction> {
 
             let mut result = Vec::new();
             root.traverse(|child| {
-                if child.tag() != gimli::DW_TAG_subprogram {
+                if child.tag() != gimli::DW_TAG_subprogram || child.is_builtin() {
                     return Visit::Continue;
                 }
 
-                let Some((low_pc, high_pc)) = child.addr_range() else {
+                let Some((low_pc, high_pc)) = child.ranges().and_then(|r| r.single()) else {
                     return Visit::Continue;
                 };
 
@@ -135,7 +135,9 @@ impl Instrumenter {
             functions: parse_debug_functions(&info.dwarf),
             locations: Vec::new(),
             info,
-            validator: wasmparser::Validator::new(),
+            validator: wasmparser::Validator::new_with_features(
+                wasmparser::WasmFeatures::default() | wasmparser::WasmFeatures::LEGACY_EXCEPTIONS,
+            ),
             bkpt_type_index: 0,
             bkpt_fn_index: 0,
             stack_mem_index,
@@ -166,12 +168,16 @@ impl Instrumenter {
             dwarf,
         } = self.info;
 
+        // We only preserve functions here that were instrumented
+        // i.e. their debug stack frame has a non-zero size
+        let functions = self.functions.into_iter().filter(|f| f.size > 0).collect();
+
         DebugInfo {
             breakpoints: js_sys::SharedArrayBuffer::new(
                 (BP_PREFIX_BYTES + self.locations.len()) as u32,
             ),
             locations: self.locations,
-            functions: self.functions,
+            functions,
             memory,
             stack,
             dwarf,
@@ -240,6 +246,17 @@ impl reencode::Reencode for Instrumenter {
             .global_section(&section)
             .map_err(reencode::Error::from)?;
         reencode::utils::parse_global_section(self, globals, section)
+    }
+
+    fn parse_tag_section(
+        &mut self,
+        tags: &mut wasm_encoder::TagSection,
+        section: wasmparser::TagSectionReader<'_>,
+    ) -> InstrResult {
+        self.validator
+            .tag_section(&section)
+            .map_err(reencode::Error::from)?;
+        reencode::utils::parse_tag_section(self, tags, section)
     }
 
     fn parse_memory_section(

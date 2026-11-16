@@ -19,19 +19,16 @@ struct VectorData {
 
 impl StdVectorFormatter {
     fn data(value: &Variable) -> Result<VectorData> {
+        // Since libc++ 23, the pointers are nested in `__layout_`, which (in the unstable ABI)
+        // stores a `__size_` rather than an `__end_` pointer.
+        let layout = value.child_with_name("__layout_");
+        let value = layout.as_ref().unwrap_or(value);
         let begin = value
             .child_with_name("__begin_")
             .context("No child named '__begin_'")?;
-        let end = value
-            .child_with_name("__end_")
-            .context("No child named '__end_'")?;
-
         let begin_addr = begin
             .pointer_value()
             .context("std::vector __begin_ is unavailable")?;
-        let end_addr = end
-            .pointer_value()
-            .context("std::vector __end_ is unavailable")?;
 
         let elem_ty = begin
             .ty()
@@ -41,16 +38,35 @@ impl StdVectorFormatter {
             .byte_size()
             .context("std::vector element size is unavailable")? as usize;
 
-        let bytes = u64::from(end_addr)
-            .checked_sub(u64::from(begin_addr))
-            .context("std::vector end precedes begin")?;
-        ensure!(elem_size > 0 && bytes % elem_size as u64 == 0, "Invalid std::vector element range");
-        ensure!(u64::from(end_addr) <= value.debugger().context("no debugger")?.memory().byte_size() as u64,
-            "std::vector storage is outside memory");
-        ensure!(bytes == 0 || !begin_addr.is_null(), "std::vector storage is null");
+        ensure!(elem_size > 0, "Invalid std::vector element size");
+        let count = match value.child_with_name("__size_") {
+            Some(size) => size
+                .unsigned_value()
+                .context("std::vector __size_ is unavailable")?,
+            None => {
+                let end = value
+                    .child_with_name("__end_")
+                    .and_then(|end| end.pointer_value())
+                    .context("std::vector __end_ is unavailable")?;
+                let bytes = u64::from(end)
+                    .checked_sub(u64::from(begin_addr))
+                    .context("std::vector end precedes begin")?;
+                ensure!(bytes % elem_size as u64 == 0, "Invalid std::vector element range");
+                bytes / elem_size as u64
+            }
+        };
+        let memory_size = value.debugger().context("no debugger")?.memory().byte_size() as u64;
+        ensure!(
+            count
+                .checked_mul(elem_size as u64)
+                .and_then(|bytes| bytes.checked_add(u64::from(begin_addr)))
+                .is_some_and(|end| end <= memory_size),
+            "std::vector storage is outside memory"
+        );
+        ensure!(count == 0 || !begin_addr.is_null(), "std::vector storage is null");
         Ok(VectorData {
             begin: begin.clone(),
-            count: bytes as usize / elem_size,
+            count: count as usize,
             elem_ty,
             elem_size,
         })

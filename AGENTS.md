@@ -3,12 +3,15 @@
 - `npm run dev` to run the local engine dev loop. Changes to project files will trigger automatic rebuild
 - `npm run build` to build the project.
   - This command builds the Rust components to WASM and then bundles everything into the npm library.
-- `npm run tools:dap` to run a suite of integration tests against the Debugger Adapter Protocol (DAP).
-- `npm run tools:dap -- {test}` to run a specific integration test.
+- `npm run test:dap` to run a suite of integration tests against the Debugger Adapter Protocol (DAP).
+- `npm run test:dap -- {test}` to run a specific integration test.
+- `npm run test:browser` to run the unit tests in `tests/browser` (Vitest browser mode, in headless Chromium), against the built library. `npm run test:browser -- {path}` runs a subset (e.g. `npm run test:browser -- toolchains/cpp`). Tests live in `tests/browser/tests`, one file per area, using the helpers in `tests/browser/helpers.ts`.
+- `npm run test` to run both `test:browser` and `test:dap`.
+- `npm run tools:toolchain {name} build` (e.g. `llvm`) to rebuild a toolchain's binary and sysroot in Docker, into `tools/toolchains/{name}/output`, and run `npm run test` against them. `npm run tools:toolchain {name} release` also publishes them to the toolchain's fork. Each toolchain's `provenance.json` pins its upstream source (with `changes.patch` applied) and the artifact URLs the library uses. See `tools/toolchains/README.md`.
 - Don't use `web_sys::console`, instead use the provided `util::log!` and `util::warn!` macros which provide native Rust formatting.
 - Use `util::weak_error!` to dilute a `Result` into an `Option` (logging the error) for exceptional behaviour that doesn't need to panic, and especially in core interfaces.
 
-You can assume that the dev server is always running. You do not need to manually rebuild the project. Instead, just use `npm run tools:dap` to test the code which will wait for in-progress builds to complete.
+You can assume that the dev server is always running. You do not need to manually rebuild the project. Instead, just use `npm run test:dap` to test the code which will wait for in-progress builds to complete.
 
 ## Contribution Standards
 

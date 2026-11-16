@@ -1,0 +1,11 @@
+{
+  "name": "@debugger-sh/toolchains",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "toolchain": "npm install --silent && npx -y bun run.ts"
+  },
+  "dependencies": {
+    "@types/bun": "^1.3.13"
+  }
+}

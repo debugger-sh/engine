@@ -6,6 +6,8 @@ import dts from 'vite-plugin-dts';
 const outDir = 'dist';
 
 export default defineConfig({
+  // Resolve the worker chunk relative to the library, wherever it is served from
+  base: './',
   plugins: [wasm(), dts()],
   worker: {
     format: 'es',
@@ -15,7 +17,10 @@ export default defineConfig({
     outDir,
     lib: {
       entry: 'src/ts/index.ts',
-      name: 'engine'
+      name: 'engine',
+      fileName: 'debugger-sh',
+      // Workers are separate chunks, which UMD cannot express
+      formats: ['es']
     }
   }
 });
@@ -41,11 +46,14 @@ function wasm(): PluginOption {
         }
       }
 
-      const file = path.join(outDir, 'debugger-sh.js');
-      if (!fs.existsSync(file)) return; // in worker builds this file doesn't exist yet
-      let js = fs.readFileSync(file, { encoding: 'utf-8' });
-      js = js.replaceAll(/(["'`])data:application\/wasm[^"'`]*\1/g, '""');
-      fs.writeFileSync(file, js, { encoding: 'utf-8' });
+      // Workers receive the compiled engine from the main thread, so drop the
+      // copies of the binary that `wasm-bindgen`'s default URL inlines
+      for (const file of fs.readdirSync(outDir, { recursive: true, encoding: 'utf-8' })) {
+        if (!file.endsWith('.js')) continue;
+        const js = fs.readFileSync(path.join(outDir, file), { encoding: 'utf-8' });
+        const stripped = js.replaceAll(/(["'`])data:application\/wasm[^"'`]*\1/g, '""');
+        fs.writeFileSync(path.join(outDir, file), stripped, { encoding: 'utf-8' });
+      }
     },
 
     /**
