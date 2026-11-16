@@ -381,7 +381,7 @@ impl Fs {
         Ok(entries)
     }
 
-    /// Extracts a tarball (optionally gzipped) or zip archive into `at`.
+    /// Extracts a tarball (optionally compressed with gzip or zstd) or zip archive into `at`.
     fn extract(&self, at: &Path, bytes: &[u8]) -> Result<(), JsError> {
         let fs = self.fs();
         create_dir_all(fs, at).map_err(|e| fs_error(e, at))?;
@@ -409,9 +409,12 @@ impl Fs {
             return Ok(());
         }
 
-        let reader: Box<dyn Read> = match bytes.starts_with(&[0x1f, 0x8b]) {
-            true => Box::new(flate2::read::GzDecoder::new(bytes)),
-            false => Box::new(bytes),
+        let reader: Box<dyn Read> = if bytes.starts_with(&[0x1f, 0x8b]) {
+            Box::new(flate2::read::GzDecoder::new(bytes))
+        } else if bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
+            Box::new(ruzstd::decoding::StreamingDecoder::new(bytes).map_err(io::Error::other)?)
+        } else {
+            Box::new(bytes)
         };
         for entry in tar::Archive::new(reader).entries()? {
             let mut entry = entry?;

@@ -17,7 +17,7 @@ test('reports exceptions on stderr', async () => {
   const engine = await eng({ 'main.py': 'raise ValueError("bad")' });
   await expect(engine.run('python')).outputs({
     exitCode: 1,
-    stderr: expect.stringContaining('ValueError: bad')
+    stderr: expect.stringMatching(/ValueError\S*: \S*bad/)
   });
 });
 

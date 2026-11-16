@@ -23,14 +23,14 @@ function getToolchainArtifact(toolchain: string, artifact: string): string {
 }
 
 const LLVM = getToolchainArtifact('llvm', 'llvm');
-const RUSTC = 'https://debugger-sh.github.io/engine/rustc.wasm';
-const PYTHON = 'https://runno.dev/langs/python-3.11.3.wasm';
+const RUSTC = getToolchainArtifact('rust', 'rustc');
+const PYTHON = getToolchainArtifact('python', 'python');
 
 /** The default sysroot of each toolchain. */
 export const sysroots: Record<string, string> = {
   cpp: getToolchainArtifact('llvm', 'sysroot'),
-  rust: 'https://debugger-sh.github.io/engine/rust-sysroot.tar.gz',
-  python: 'https://runno.dev/langs/python-3.11.3.tar.gz'
+  rust: getToolchainArtifact('rust', 'sysroot'),
+  python: getToolchainArtifact('python', 'sysroot')
 };
 
 /** Built-in commands: the binary to run, and its `argv[0]`. */
@@ -62,8 +62,8 @@ export interface RunOptions {
    * You can configure the toolchain that is used by passing the following:
    *
    *  * A language toolchain name, e.g. `"cpp"`, to use the default sysroot for that toolchain.
-   *  * The URL to a toolchain archive to download and use. Tarballs (.tar.gz) and zip archives
-   *    are currently supported.
+   *  * The URL to a toolchain archive to download and use. Tarballs (.tar, .tar.gz and
+   *    .tar.zst) and zip archives are currently supported.
    */
   sysroot?: Toolchain | (string & {});
 
@@ -415,7 +415,7 @@ function dependencies(rule: string): string[] {
 /** The standard library rlibs to link, in dependency order. */
 // prettier-ignore
 const RUST_LIBS = [
-  'panic_abort', 'std', 'wasi', 'cfg_if', 'rustc_demangle', 'std_detect', 'hashbrown',
+  'panic_abort', 'std', 'wasi', 'wasip1', 'cfg_if', 'rustc_demangle', 'std_detect', 'hashbrown',
   'rustc_std_workspace_alloc', 'miniz_oxide', 'adler2', 'unwind', 'libc',
   'rustc_std_workspace_core', 'alloc', 'core', 'compiler_builtins'
 ];

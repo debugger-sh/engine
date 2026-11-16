@@ -64,10 +64,14 @@ async function artifactsAt(base: string): Promise<Record<string, string>> {
  * volume), then tests the library with it: the artifacts temporarily point at a local server.
  */
 async function build(): Promise<number> {
+  // Every toolchain's image builds on the shared one in this folder (see Dockerfile).
   const image = `debugger-sh-toolchain-${name}`;
+  const docker = (...args: string[]) => run('docker', ...args, import.meta.dir);
+  await rm(OUTPUT, { recursive: true, force: true });
   await mkdir(OUTPUT, { recursive: true });
   const built =
-    (await run('docker', 'build', '-t', image, DIR)) ||
+    (await docker('build', '-t', 'debugger-sh-toolchain')) ||
+    (await docker('build', '-t', image, '-f', path.join(DIR, 'Dockerfile'))) ||
     (await run('docker', 'run', '--rm', '-v', `${image}:/work`, '-v', `${OUTPUT}:/out`, image));
   if (built) return built;
 
@@ -151,9 +155,11 @@ async function release(): Promise<number> {
     await $`git init -q ${source}`;
     await $`git fetch -q --depth 1 ${upstream.repository} ${upstream.revision}`.cwd(source);
     await $`git checkout -q FETCH_HEAD`.cwd(source);
-    await $`git am -q --committer-date-is-author-date ${path.join(DIR, 'changes.patch')}`.cwd(
-      source
-    );
+    // A toolchain that needs no changes (and so has no patch) is released as the upstream revision.
+    const patch = path.join(DIR, 'changes.patch');
+    if (await Bun.file(patch).exists()) {
+      await $`git am -q --committer-date-is-author-date ${patch}`.cwd(source);
+    }
     await $`${git} push -q --force ${remote} HEAD:refs/heads/${branch} HEAD:refs/tags/${version}`.cwd(
       source
     );

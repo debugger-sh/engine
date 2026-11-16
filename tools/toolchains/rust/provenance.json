@@ -1,0 +1,14 @@
+{
+  "upstream": {
+    "repository": "https://github.com/rust-lang/rust",
+    "revision": "0ef1bc386059596dada8fb65b50425aab2ea637a"
+  },
+  "fork": {
+    "repository": "https://github.com/debugger-sh/rust",
+    "release": "https://github.com/debugger-sh/rust/releases/tag/0.3.15"
+  },
+  "artifacts": {
+    "rustc": "https://debugger-sh.github.io/rust/0.3.15/rustc.wasm",
+    "sysroot": "https://debugger-sh.github.io/rust/0.3.15/sysroot.tar.zst"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "upstream": {
+    "repository": "https://github.com/python/cpython",
+    "revision": "5e58eaad7c58df58dfa8ea549c87996e01dd1077"
+  },
+  "fork": {
+    "repository": "https://github.com/debugger-sh/cpython",
+    "release": "https://github.com/debugger-sh/cpython/releases/tag/0.3.15"
+  },
+  "artifacts": {
+    "python": "https://debugger-sh.github.io/cpython/0.3.15/python.wasm",
+    "sysroot": "https://debugger-sh.github.io/cpython/0.3.15/sysroot.tar.zst"
+  }
+}

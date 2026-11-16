@@ -9,6 +9,6 @@
   },
   "artifacts": {
     "llvm": "https://debugger-sh.github.io/llvm/0.3.15/llvm.wasm",
-    "sysroot": "https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.gz"
+    "sysroot": "https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.zst"
   }
 }
