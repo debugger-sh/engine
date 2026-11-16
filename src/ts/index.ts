@@ -11,6 +11,7 @@ import {
   sysroots,
   type Toolchain,
   type ToolchainOptionsMap,
+  toolchainProvenance,
   toolchains
 } from './toolchains';
 import { internal, Internals, join } from './util';
@@ -53,11 +54,33 @@ const modules = new Map<string, Promise<WebAssembly.Module | Failure>>();
 /** Loaded sysroots (or failures), by URL. Shared by all engines, never copied. */
 const sysrootCache = new Map<string, Promise<Fs | Failure>>();
 
+const artifactChecksums = new Map(
+  Object.values(toolchainProvenance).flatMap((manifest) =>
+    Object.entries(manifest.artifacts).map(([name, url]) => [url, manifest.sha256[name]])
+  )
+);
+const reloadArtifacts = new Set<string>();
+
 async function fetchResponse(url: string): Promise<Response | Failure> {
-  // Toolchain binaries are versioned by URL, so they can be cached indefinitely.
-  const response = await fetch(url, { cache: 'force-cache' }).catch(() => undefined);
+  const response = await fetch(url, {
+    cache: reloadArtifacts.has(url) ? 'reload' : 'force-cache'
+  }).catch(() => undefined);
   if (!response?.ok) return [127, `network error (${response?.status ?? 0})`];
-  return response;
+  const expected = artifactChecksums.get(url);
+  if (!expected) return response;
+  const bytes = await response.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const actual = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  if (actual !== expected) {
+    reloadArtifacts.add(url);
+    return [126, `toolchain checksum mismatch: ${url} (expected ${expected}, received ${actual})`];
+  }
+  reloadArtifacts.delete(url);
+  return new Response(bytes, {
+    headers: { 'Content-Type': response.headers.get('Content-Type') ?? 'application/octet-stream' }
+  });
 }
 
 async function fetchBytes(url: string): Promise<Uint8Array<ArrayBuffer> | Failure> {

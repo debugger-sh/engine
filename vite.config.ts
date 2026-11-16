@@ -8,7 +8,7 @@ const outDir = 'dist';
 export default defineConfig({
   // Resolve the worker chunk relative to the library, wherever it is served from
   base: './',
-  plugins: [wasm(), dts()],
+  plugins: [toolchainManifests(), wasm(), dts()],
   worker: {
     format: 'es',
     plugins: () => [wasm()]
@@ -25,6 +25,36 @@ export default defineConfig({
   }
 });
 
+function toolchainManifest(filename: string) {
+  const manifest = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  const base = process.env.ENGINE_TOOLCHAIN_BASE_URL;
+  if (base) {
+    manifest.originArtifacts = manifest.artifacts;
+    manifest.artifacts = Object.fromEntries(
+      Object.entries(manifest.originArtifacts).map(([name, url]) => [
+        name,
+        new URL(
+          `${manifest.sha256[name]}/${path.basename(new URL(url as string).pathname)}`,
+          base.endsWith('/') ? base : `${base}/`
+        ).href
+      ])
+    );
+  }
+  return manifest;
+}
+
+function toolchainManifests(): PluginOption {
+  return {
+    name: 'pinned-toolchain-mirrors',
+    enforce: 'pre',
+    load(id) {
+      if (/\/tools\/toolchains\/[^/]+\/provenance\.json$/.test(id)) {
+        return JSON.stringify(toolchainManifest(id));
+      }
+    }
+  };
+}
+
 function wasm(): PluginOption {
   return {
     name: 'fix-wasm-import',
@@ -39,7 +69,7 @@ function wasm(): PluginOption {
           ['rust', 'rust']
         ].map(([language, toolchain]) => [
           language,
-          JSON.parse(fs.readFileSync(`tools/toolchains/${toolchain}/provenance.json`, 'utf8'))
+          toolchainManifest(`tools/toolchains/${toolchain}/provenance.json`)
         ])
       );
       fs.mkdirSync(outDir, { recursive: true });

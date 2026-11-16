@@ -5,9 +5,19 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: engine-migration-candidate
+  cancel-in-progress: false
 jobs:
   candidate:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    env:
+      ENGINE_TOOLCHAIN_BASE_URL: https://justinvassantachart.github.io/engine/toolchains/sha256/
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,6 +29,18 @@ jobs:
       - run: cargo install wasm-pack --version 0.15.0 --locked
       - run: npm ci
       - run: npx playwright install --with-deps chromium webkit
+      - name: Verify and preserve toolchain mirrors
+        run: |
+          mkdir -p mirrors/pages
+          node tests/package/pages.mjs restore mirrors/pages
+          node tests/package/toolchains.mjs mirrors > toolchains-verified.jsonl
+          node tests/package/pages.mjs save mirrors/pages
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: mirrors/pages
+      - uses: actions/deploy-pages@v4
+        id: pages
       - name: Build pinned candidate using the release build
         run: |
           npm version --no-git-tag-version "0.3.16-upstream.${GITHUB_SHA::12}"
@@ -28,18 +50,17 @@ jobs:
           node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("pack.json"))[0].filename)' > tarball.txt
       - name: Run browser regressions and installed package smoke
         run: |
-          node tests/package/toolchains.mjs > toolchains-verified.jsonl
           npm run test:browser
-          ENGINE_BROWSER=webkit npm run test:browser -- tests/devices.ts tests/process.ts tests/toolchains/cpp.ts tests/toolchains/python.ts tests/initialization.ts
+          ENGINE_BROWSER=webkit npm run test:browser -- tests/devices.ts tests/process.ts tests/toolchains/cpp.ts tests/toolchains/python.ts tests/initialization.ts tests/integrity.ts
           node tests/package/smoke.mjs "$(cat tarball.txt)"
           npm run test:dap
       - name: Record and publish immutable prerelease artifact
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha256sum "$(cat tarball.txt)" dist/engine_bg.wasm > SHA256SUMS
+          sha256sum "$(cat tarball.txt)" dist/*.js dist/*.wasm dist/*.json mirrors/release-assets/* > SHA256SUMS
           tag="upstream-${GITHUB_SHA}"
-          gh release create "$tag" "$(cat tarball.txt)" SHA256SUMS pack.json toolchains-verified.jsonl --target "$GITHUB_SHA" --prerelease --title "Upstream migration ${GITHUB_SHA::12}" --notes "Pinned migration candidate; no stable npm publication. Built and smoke-tested in Chromium and WebKit from the installed tarball."
+          gh release create "$tag" "$(cat tarball.txt)" SHA256SUMS pack.json toolchains-verified.jsonl mirrors/release-assets/* --target "$GITHUB_SHA" --prerelease --title "Upstream migration ${GITHUB_SHA::12}" --notes "Pinned migration candidate; no stable npm publication. Built and smoke-tested in Chromium and WebKit from the installed tarball. Toolchain bytes are verified at build and runtime, preserved here, and mirrored at content-addressed Pages URLs for browser CORS."
       - uses: actions/upload-artifact@v4
         if: always()
         with:

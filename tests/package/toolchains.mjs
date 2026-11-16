@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const directory = process.argv[2];
 
 for (const toolchain of ['llvm', 'python', 'rust']) {
   const manifest = JSON.parse(
@@ -13,6 +16,15 @@ for (const toolchain of ['llvm', 'python', 'rust']) {
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     assert.equal(sha256, manifest.sha256[name], url);
     if (name !== 'sysroot') assert.deepEqual([...bytes.slice(0, 4)], [0, 97, 115, 109]);
+    if (directory) {
+      const filename = path.basename(new URL(url).pathname);
+      const pages = path.join(directory, 'pages', 'toolchains', 'sha256', sha256);
+      const release = path.join(directory, 'release-assets');
+      await mkdir(pages, { recursive: true });
+      await mkdir(release, { recursive: true });
+      await writeFile(path.join(pages, filename), bytes);
+      await writeFile(path.join(release, `${toolchain}-${filename}`), bytes);
+    }
     console.log(JSON.stringify({ toolchain, name, url, sha256, size: bytes.length }));
   }
 }

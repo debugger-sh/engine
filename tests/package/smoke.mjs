@@ -63,6 +63,20 @@ try {
   server = await preview({
     root,
     configFile: false,
+    plugins: [
+      {
+        name: 'consumer-isolation',
+        configurePreviewServer(server) {
+          // Install before static serving so cached worker responses (304) retain
+          // isolation headers, just like fresh responses.
+          server.middlewares.use((_request, response, next) => {
+            response.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+            response.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+            next();
+          });
+        }
+      }
+    ],
     preview: {
       port: 0,
       headers: {
@@ -83,7 +97,13 @@ try {
       );
       await page.goto(server.resolvedUrls.local[0]);
       await page.waitForFunction(() => typeof window.smoke === 'function');
-      const result = await page.evaluate(() => window.smoke());
+      const result = await page
+        .evaluate(() => window.smoke())
+        .catch((error) => {
+          throw new Error(`${name} consumer smoke failed: ${failures.join('; ')}`, {
+            cause: error
+          });
+        });
       assert.deepEqual(failures, []);
       console.log(
         JSON.stringify({

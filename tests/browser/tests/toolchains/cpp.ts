@@ -1,3 +1,4 @@
+import { toolchainProvenance } from 'debugger-sh';
 import { expect, test } from 'vitest';
 
 import { eng, HELLO, sleep } from '../../helpers';
@@ -56,8 +57,8 @@ test('cache receipts include sysroot identity and hash system headers', async ()
   const engine = await eng({ 'main.cpp': HELLO });
   await engine.run('cpp', { compileOnly: true });
   const dep = await engine.fs.readFile('/build/main.cpp.d', 'utf8');
-  expect(dep).toContain('"sysroot":["https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.zst"');
-  expect(dep).toContain('"compiler":["https://debugger-sh.github.io/llvm/0.3.15/llvm.wasm"');
+  expect(dep).toContain(`"sysroot":["${toolchainProvenance.cpp.artifacts.sysroot}"`);
+  expect(dep).toContain(`"compiler":["${toolchainProvenance.cpp.artifacts.llvm}"`);
   expect(dep).toMatch(/^\/include\/c\+\+\/v1\/cstdio: [0-9a-f]{8}$/m);
 });
 
@@ -191,7 +192,7 @@ test('changing sysroot identity invalidates otherwise unchanged objects', async 
   await expect(
     engine.run('cpp', {
       compileOnly: true,
-      sysroot: 'https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.zst#another-toolchain'
+      sysroot: `${toolchainProvenance.cpp.artifacts.sysroot}#another-toolchain`
     })
   ).outputs({ exitCode: 0 });
   expect((await engine.fs.stat('/build/main.cpp.o')).modified).toBeGreaterThan(before);

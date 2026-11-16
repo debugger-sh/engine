@@ -12,6 +12,8 @@ import { dirname, Internals, join } from './util';
 export interface ToolchainProvenance {
   readonly upstream: { readonly repository: string; readonly revision: string };
   readonly artifacts: Readonly<Record<string, string>>;
+  /** Original publisher URLs when this build uses checksum-addressed mirrors. */
+  readonly originArtifacts?: Readonly<Record<string, string>>;
   readonly sha256: Readonly<Record<string, string>>;
 }
 

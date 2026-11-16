@@ -13,6 +13,17 @@ const proxy = process.env.HTTPS_PROXY
 
 export default defineConfig({
   root: import.meta.dirname,
+  plugins: [
+    {
+      name: 'test-isolation',
+      configureServer(server) {
+        server.middlewares.use((_request, response, next) => {
+          for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
+          next();
+        });
+      }
+    }
+  ],
   // Test the built library (`npm run build`), exactly as published.
   resolve: {
     alias: { 'debugger-sh': path.resolve(import.meta.dirname, '../../dist/debugger-sh.js') }
