@@ -32,6 +32,21 @@ function wasm(): PluginOption {
       if (fileName.endsWith('.wasm')) return JSON.stringify(`./${fileName}`);
     },
     async closeBundle() {
+      const provenance = Object.fromEntries(
+        [
+          ['cpp', 'llvm'],
+          ['python', 'python'],
+          ['rust', 'rust']
+        ].map(([language, toolchain]) => [
+          language,
+          JSON.parse(fs.readFileSync(`tools/toolchains/${toolchain}/provenance.json`, 'utf8'))
+        ])
+      );
+      fs.mkdirSync(outDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(outDir, 'toolchain-provenance.json'),
+        JSON.stringify(provenance, null, 2) + '\n'
+      );
       const pkgDir = 'pkg';
       if (fs.existsSync(pkgDir)) {
         const wasmFiles = fs.readdirSync(pkgDir).filter((file) => file.endsWith('.wasm'));

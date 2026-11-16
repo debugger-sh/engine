@@ -145,3 +145,21 @@ test('processes write to duplexes', async () => {
   });
   expect(decode(await dup.read())).toBe('from guest');
 });
+
+test('stopping a duplex request closes the old response path before rerun', async () => {
+  const engine = await eng();
+  const program =
+    "import os; fd=os.open('/dev/host',os.O_RDWR); os.write(fd,b'request'); print(os.read(fd,99).decode())";
+  const old = new Duplex();
+  const first = engine.run('python', ['-c', program], { devices: { '/dev/host': old } });
+  expect(decode(await old.read())).toBe('request');
+  first.kill();
+  expect(await first).toEqual({ exitCode: 137, killed: true });
+  const current = new Duplex();
+  const second = engine.run('python', ['-c', program], { devices: { '/dev/host': current } });
+  const output = expect(second).outputs({ exitCode: 0, stdout: 'current\n' });
+  expect(decode(await current.read())).toBe('request');
+  await expect(old.write('stale')).rejects.toThrow('closed');
+  await current.write('current');
+  await output;
+});

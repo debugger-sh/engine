@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { chromium, webkit } from 'playwright';
@@ -9,7 +9,7 @@ import { build, preview } from 'vite';
 // Test the installed tarball through a separate production consumer build. The
 // consumer cannot import the Engine source tree or borrow its generated pkg/.
 const archive = path.resolve(process.argv[2]);
-const root = await mkdtemp(path.join(tmpdir(), 'engine-consumer-'));
+const root = await realpath(await mkdtemp(path.join(tmpdir(), 'engine-consumer-')));
 let server;
 try {
   await writeFile(

@@ -32,6 +32,7 @@ jobs:
           npm run test:browser
           ENGINE_BROWSER=webkit npm run test:browser -- tests/devices.ts tests/process.ts tests/toolchains/cpp.ts tests/toolchains/python.ts
           node tests/package/smoke.mjs "$(cat tarball.txt)"
+          npm run test:dap
       - name: Record and publish immutable prerelease artifact
         env:
           GH_TOKEN: ${{ github.token }}

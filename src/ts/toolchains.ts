@@ -380,7 +380,7 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
       '-x', 'c++', '-std=c++23', '-O0', '-debug-info-kind=standalone', '-dwarf-version=5',
       '-fcxx-exceptions', '-fexceptions', '-exception-model=wasm', '-target-feature',
       '+exception-handling', '-mllvm', '-wasm-enable-eh', '-mllvm', '-wasm-use-legacy-eh=true',
-      '-dependency-file', dep, '-MT', obj, ...cxxFlags, '-o', obj, source
+      '-dependency-file', dep, '-sys-header-deps', '-MT', obj, ...cxxFlags, '-o', obj, source
     ];
     const command = JSON.stringify({
       args,
@@ -433,8 +433,9 @@ async function isStale(
   const [rule, ...lines] = text.replace(/\\\n/g, ' ').split('\n');
   if (!lines.includes(`# ${command}`)) return true;
   const hashes = new Map(lines.map((line) => line.split(': ') as [string, string]));
-  for (const path of dependencies(rule)) if (hashes.get(path) !== (await hash(path))) return true;
-  return false;
+  const paths = dependencies(rule);
+  const current = await Promise.all(paths.map(hash));
+  return paths.some((path, i) => current[i] === undefined || hashes.get(path) !== current[i]);
 }
 
 /** Extends the compiler's `.d` file with the hash of every dependency (and the command). */

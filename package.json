@@ -19,6 +19,7 @@
   "module": "./dist/debugger-sh.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./toolchain-provenance.json": "./dist/toolchain-provenance.json",
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/debugger-sh.js"
