@@ -58,7 +58,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sha256sum "$(cat tarball.txt)" dist/*.js dist/*.wasm dist/*.json mirrors/release-assets/* > SHA256SUMS
+          sha256sum "$(cat tarball.txt)" dist/*.js dist/assets/*.js dist/*.wasm dist/*.json mirrors/release-assets/* > SHA256SUMS
           tag="upstream-${GITHUB_SHA}"
           gh release create "$tag" "$(cat tarball.txt)" SHA256SUMS pack.json toolchains-verified.jsonl mirrors/release-assets/* --target "$GITHUB_SHA" --prerelease --title "Upstream migration ${GITHUB_SHA::12}" --notes "Pinned migration candidate; no stable npm publication. Built and smoke-tested in Chromium and WebKit from the installed tarball. Toolchain bytes are verified at build and runtime, preserved here, and mirrored at content-addressed Pages URLs for browser CORS."
       - uses: actions/upload-artifact@v4

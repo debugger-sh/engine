@@ -10,14 +10,25 @@ for (const toolchain of ['llvm', 'python', 'rust']) {
     await readFile(new URL(`../../tools/toolchains/${toolchain}/provenance.json`, import.meta.url))
   );
   for (const [name, url] of Object.entries(manifest.artifacts)) {
-    const response = await fetch(url);
-    assert(response.ok, `${url}: ${response.status}`);
+    const filename = path.basename(new URL(url).pathname);
+    const base = process.env.ENGINE_TOOLCHAIN_BASE_URL;
+    const mirror =
+      base &&
+      new URL(`${manifest.sha256[name]}/${filename}`, base.endsWith('/') ? base : `${base}/`).href;
+    // Existing checksums can be rebuilt even after the original publisher moves
+    // a versioned URL. New checksums are verified before the first mirror upload.
+    let downloadUrl = mirror ?? url;
+    let response = await fetch(downloadUrl);
+    if (mirror && response.status === 404) {
+      downloadUrl = url;
+      response = await fetch(downloadUrl);
+    }
+    assert(response.ok, `${downloadUrl}: ${response.status}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     assert.equal(sha256, manifest.sha256[name], url);
     if (name !== 'sysroot') assert.deepEqual([...bytes.slice(0, 4)], [0, 97, 115, 109]);
     if (directory) {
-      const filename = path.basename(new URL(url).pathname);
       const pages = path.join(directory, 'pages', 'toolchains', 'sha256', sha256);
       const release = path.join(directory, 'release-assets');
       await mkdir(pages, { recursive: true });
@@ -25,6 +36,6 @@ for (const toolchain of ['llvm', 'python', 'rust']) {
       await writeFile(path.join(pages, filename), bytes);
       await writeFile(path.join(release, `${toolchain}-${filename}`), bytes);
     }
-    console.log(JSON.stringify({ toolchain, name, url, sha256, size: bytes.length }));
+    console.log(JSON.stringify({ toolchain, name, url, downloadUrl, sha256, size: bytes.length }));
   }
 }

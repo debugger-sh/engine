@@ -6,6 +6,13 @@ import { gate_doom, gate_idle, gate_new } from '../../pkg/engine';
 import type { Debugger } from './debugger';
 import { internal, Internals, tick } from './util';
 
+export interface ProcessError {
+  readonly type: 'load';
+  readonly reason: 'network' | 'integrity' | 'compile' | 'archive';
+  readonly url: string;
+  readonly message: string;
+}
+
 export interface ProcessResult {
   /**
    * The exit code of the process.
@@ -17,6 +24,8 @@ export interface ProcessResult {
 
   /** Whether or not the process was killed by calling {@link Process.kill}. */
   killed: boolean;
+  /** Host asset loading failed. Guest exit codes alone never set this field. */
+  error?: ProcessError;
 }
 
 /** The standard streams of a process, shared by all of its steps. */
@@ -82,12 +91,14 @@ export class Process implements PromiseLike<ProcessResult> {
     onKill(kill: () => void): () => void;
     /** Writes a message to this process' stderr, resolving once it is written. */
     error(message: string): Promise<void>;
+    fail(error: ProcessError): void;
   };
 
   readonly #result: Promise<ProcessResult>;
   readonly #killers = new Set<() => void>();
   #finished = false;
   #killed = false;
+  #error?: ProcessError;
 
   /**
    * @internal
@@ -114,7 +125,10 @@ export class Process implements PromiseLike<ProcessResult> {
         this.#killers.add(kill);
         return () => void this.#killers.delete(kill);
       },
-      error: (message) => stdio.stderr.write(`${message}\n`).catch(() => {})
+      error: (message) => stdio.stderr.write(`${message}\n`).catch(() => {}),
+      fail: (error) => {
+        this.#error ??= error;
+      }
     };
 
     let kill!: (result: ProcessResult) => void;
@@ -124,7 +138,11 @@ export class Process implements PromiseLike<ProcessResult> {
     // Start the body on the next tick, so that callers can attach listeners first.
     const ran = tick().then(() => (this.#killed ? 137 : body(this)));
     this.#result = Promise.race([
-      ran.then((exitCode) => ({ exitCode, killed: false })),
+      ran.then((exitCode) => ({
+        exitCode,
+        killed: false,
+        ...(this.#error ? { error: this.#error } : {})
+      })),
       killed
     ]).finally(() => {
       for (const pipe of pipes) pipe.close();

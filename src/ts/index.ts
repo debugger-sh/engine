@@ -2,7 +2,15 @@ import init, { Fs, type InitOutput } from '../../pkg/engine';
 import wasmBinary from '../../pkg/engine_bg.wasm';
 import { Debugger } from './debugger';
 import { Filesystem } from './fs';
-import { Duplex, Pipe, Pool, Process, type Stdio, type WorkerMessage } from './process';
+import {
+  Duplex,
+  Pipe,
+  Pool,
+  Process,
+  type ProcessError,
+  type Stdio,
+  type WorkerMessage
+} from './process';
 import {
   commands,
   type Context,
@@ -37,7 +45,14 @@ export interface DebuggableProcess extends Process {
 }
 
 /** A failure to resolve a program: an exit code, and a message for stderr. */
-type Failure = [code: number, message: string];
+type Failure = [code: number, message: string, error?: ProcessError];
+
+const loadFailure = (
+  code: number,
+  reason: ProcessError['reason'],
+  url: string,
+  message: string
+): Failure => [code, message, { type: 'load', reason, url, message }];
 
 const isFailure = (value: unknown): value is Failure => Array.isArray(value);
 
@@ -65,7 +80,8 @@ async function fetchResponse(url: string): Promise<Response | Failure> {
   const response = await fetch(url, {
     cache: reloadArtifacts.has(url) ? 'reload' : 'force-cache'
   }).catch(() => undefined);
-  if (!response?.ok) return [127, `network error (${response?.status ?? 0})`];
+  if (!response?.ok)
+    return loadFailure(127, 'network', url, `network error (${response?.status ?? 0})`);
   const expected = artifactChecksums.get(url);
   if (!expected) return response;
   const bytes = await response.arrayBuffer();
@@ -75,7 +91,12 @@ async function fetchResponse(url: string): Promise<Response | Failure> {
   ).join('');
   if (actual !== expected) {
     reloadArtifacts.add(url);
-    return [126, `toolchain checksum mismatch: ${url} (expected ${expected}, received ${actual})`];
+    return loadFailure(
+      126,
+      'integrity',
+      url,
+      `toolchain checksum mismatch: ${url} (expected ${expected}, received ${actual})`
+    );
   }
   reloadArtifacts.delete(url);
   return new Response(bytes, {
@@ -298,13 +319,19 @@ export class Engine {
         const { stdio } = process[Internals];
         const child = this.#spawn(stdio, process.debugger, command, args, { env, ...step });
         const release = process[Internals].onKill(() => child.kill());
-        const { exitCode } = await child;
+        const { exitCode, error } = await child;
+        if (error) process[Internals].fail(error);
         release();
         return exitCode;
       },
       sysroot: async (name) => {
         const sysroot = await this.#sysroot(sysrootUrl(name));
-        return isFailure(sysroot) ? undefined : sysroot;
+        if (isFailure(sysroot)) {
+          if (sysroot[2]) process[Internals].fail(sysroot[2]);
+          await process[Internals].error(`${name}: ${sysroot[1]}`);
+          return undefined;
+        }
+        return sysroot;
       }
     };
     return (toolchains[name] as (ctx: Context<Toolchain>) => Promise<number>)(ctx);
@@ -316,7 +343,12 @@ export class Engine {
       const bytes = await fetchBytes(url);
       if (isFailure(bytes)) return bytes;
       const fs = new Fs();
-      await fs.mount('/', bytes);
+      try {
+        await fs.mount('/', bytes);
+      } catch (error) {
+        fs.free();
+        return loadFailure(126, 'archive', url, `cannot load sysroot: ${String(error)}`);
+      }
       return fs;
     });
   }
@@ -330,10 +362,11 @@ export class Engine {
   ): Promise<number> {
     if (process[Internals].killed || this.#disposed) return 137;
     const name = options.name ?? program.path ?? program.url ?? 'main';
-    const fail = async ([code, message]: Failure) => (
-      await process[Internals].error(`${name}: ${message}`),
-      code
-    );
+    const fail = async ([code, message, error]: Failure) => {
+      if (error) process[Internals].fail(error);
+      await process[Internals].error(`${name}: ${message}`);
+      return code;
+    };
     const debug = options.debug === 'python' ? 'python' : options.debug ? 'wasm' : undefined;
 
     let sysroot: number | undefined;
@@ -354,7 +387,9 @@ export class Engine {
       const compiled = await cached(modules, program.url, async () => {
         const response = await fetchResponse(program.url!);
         if (isFailure(response)) return response;
-        return WebAssembly.compileStreaming(response).catch((): Failure => [126, 'cannot execute']);
+        return WebAssembly.compileStreaming(response).catch(() =>
+          loadFailure(126, 'compile', program.url!, 'cannot execute')
+        );
       });
       if (isFailure(compiled)) return fail(compiled);
       module = compiled;
@@ -441,7 +476,14 @@ export type {
   Timestamps
 } from './fs';
 export type { Filesystem } from './fs';
-export type { Device, PipeOptions, ProcessResult, Readable, Writable } from './process';
+export type {
+  Device,
+  PipeOptions,
+  ProcessError,
+  ProcessResult,
+  Readable,
+  Writable
+} from './process';
 export type { Process } from './process';
 export { Duplex, Pipe } from './process';
 export { toolchainProvenance } from './toolchains';
