@@ -73,10 +73,11 @@ impl DequeData {
             element_size > 0 && pointer_size == 4,
             "Unsupported std::deque element layout"
         );
-        let block_size = if element_size < 256 {
-            4096 / element_size
+        // libc++ is built with ABI v2, which enables `_LIBCPP_ABI_USE_SMALL_DEQUE_BLOCK_SIZE`.
+        let block_size = if element_size < 128 {
+            512 / element_size
         } else {
-            16
+            4
         };
         let map_bytes = u64::from(end)
             .checked_sub(u64::from(begin_address))
