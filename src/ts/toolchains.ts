@@ -9,15 +9,29 @@ import type { Device, Pipe, Process } from './process';
 import type { PipeOptions, Readable } from './process';
 import { dirname, Internals, join } from './util';
 
-/** The artifacts of each toolchain in `tools/toolchains`, inlined at build time. */
-const artifacts = import.meta.glob<Record<string, string>>(
+export interface ToolchainProvenance {
+  readonly upstream: { readonly repository: string; readonly revision: string };
+  readonly artifacts: Readonly<Record<string, string>>;
+  readonly sha256: Readonly<Record<string, string>>;
+}
+
+/** Reviewed toolchain sources and artifact checksums, inlined into the package. */
+const provenance = import.meta.glob<ToolchainProvenance>(
   '../../tools/toolchains/*/provenance.json',
-  { eager: true, import: 'artifacts' }
+  { eager: true, import: 'default' }
 );
+
+export const toolchainProvenance: Readonly<Record<'cpp' | 'python' | 'rust', ToolchainProvenance>> =
+  Object.freeze({
+    cpp: provenance['../../tools/toolchains/llvm/provenance.json'],
+    python: provenance['../../tools/toolchains/python/provenance.json'],
+    rust: provenance['../../tools/toolchains/rust/provenance.json']
+  });
 
 /** The URL of an artifact of a toolchain in `tools/toolchains`, e.g. `("llvm", "sysroot")`. */
 function getToolchainArtifact(toolchain: string, artifact: string): string {
-  const url = artifacts[`../../tools/toolchains/${toolchain}/provenance.json`]?.[artifact];
+  const url =
+    provenance[`../../tools/toolchains/${toolchain}/provenance.json`]?.artifacts[artifact];
   if (!url) throw new Error(`toolchain ${toolchain} has no artifact ${artifact}`);
   return url;
 }
@@ -204,6 +218,9 @@ export interface PythonOptions {
 }
 
 export interface CppOptions {
+  /** Build the executable without starting it, for compile checks and prewarming. */
+  compileOnly?: boolean;
+
   /**
    * Globs of C/C++ sources to compile.
    *
@@ -339,6 +356,18 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
     return 1;
   }
   const object = (source: string) => join(buildDir, source) + '.o';
+  const root = await ctx.sysroot(sysroot);
+  if (ctx.process[Internals].killed) return 137;
+  if (!root) return 127;
+  const hash = async (path: string) =>
+    (await ctx.fs[Internals].raw().hash(path)) ?? (await root.hash(path));
+  // A PCH is an input, never an object-cache entry. Its contents can change while
+  // its source header and path remain the same (for example, after an ABI rebuild).
+  const pch = await Promise.all(
+    cxxFlags
+      .flatMap((flag, i) => (flag === '-include-pch' && cxxFlags[i + 1] ? [cxxFlags[i + 1]] : []))
+      .map(async (path) => [path, await hash(path)])
+  );
 
   const code = await compileAll(files, async (source) => {
     const obj = object(source);
@@ -353,12 +382,22 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
       '+exception-handling', '-mllvm', '-wasm-enable-eh', '-mllvm', '-wasm-use-legacy-eh=true',
       '-dependency-file', dep, '-MT', obj, ...cxxFlags, '-o', obj, source
     ];
-    const command = JSON.stringify(args);
-    if (!(await isStale(ctx.fs, obj, dep, command))) return 0;
+    const command = JSON.stringify({
+      args,
+      compiler: [LLVM, toolchainProvenance.cpp.sha256.llvm],
+      sysroot: [
+        sysroots[sysroot] ?? sysroot,
+        sysroot === 'cpp' ? toolchainProvenance.cpp.sha256.sysroot : undefined
+      ],
+      pch
+    });
+    if (!(await isStale(ctx.fs, obj, dep, command, hash))) return 0;
+    if (ctx.process[Internals].killed) return 137;
 
     await ctx.fs.mkdir(dirname(obj), { recursive: true });
     const code = await ctx.run('clang', args, { sysroot });
-    if (code === 0) await recordHashes(ctx.fs, dep, command);
+    if (code === 0 && !ctx.process[Internals].killed)
+      await recordHashes(ctx.fs, dep, command, hash);
     return code;
   });
   if (code) return code;
@@ -371,6 +410,7 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
     ...lldFlags, '-o', main
   ], { sysroot });
   if (linked) return linked;
+  if (ctx.options.compileOnly) return 0;
 
   return ctx.run(main, ctx.args, { debug: ctx.options.debug, devices: ctx.options.devices });
 }
@@ -384,7 +424,8 @@ async function isStale(
   fs: Filesystem,
   obj: string,
   dep: string,
-  command: string
+  command: string,
+  hash: (path: string) => Promise<string | undefined>
 ): Promise<boolean> {
   const raw = fs[Internals].raw();
   const text = await fs.readFile(dep, 'utf8').catch(() => undefined);
@@ -392,16 +433,20 @@ async function isStale(
   const [rule, ...lines] = text.replace(/\\\n/g, ' ').split('\n');
   if (!lines.includes(`# ${command}`)) return true;
   const hashes = new Map(lines.map((line) => line.split(': ') as [string, string]));
-  for (const path of dependencies(rule))
-    if (hashes.get(path) !== (await raw.hash(path))) return true;
+  for (const path of dependencies(rule)) if (hashes.get(path) !== (await hash(path))) return true;
   return false;
 }
 
 /** Extends the compiler's `.d` file with the hash of every dependency (and the command). */
-async function recordHashes(fs: Filesystem, dep: string, command: string) {
+async function recordHashes(
+  fs: Filesystem,
+  dep: string,
+  command: string,
+  hash: (path: string) => Promise<string | undefined>
+) {
   const text = (await fs.readFile(dep, 'utf8')).trimEnd();
   const paths = dependencies(text.replace(/\\\n/g, ' '));
-  const hashes = await Promise.all(paths.map((path) => fs[Internals].raw().hash(path)));
+  const hashes = await Promise.all(paths.map(hash));
   const lines = paths.map((path, i) => `${path}: ${hashes[i]}`);
   await fs.writeFile(dep, [text, ...lines, `# ${command}`, ''].join('\n'));
 }

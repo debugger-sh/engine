@@ -72,6 +72,7 @@ export class Process implements PromiseLike<ProcessResult> {
 
   /** @internal */
   readonly [Internals]: {
+    readonly killed: boolean;
     /** The pipes behind `stdin`, `stdout` and `stderr`. */
     stdio: Stdio;
     /**
@@ -102,7 +103,11 @@ export class Process implements PromiseLike<ProcessResult> {
     internal(key);
     ({ stdin: this.stdin, stdout: this.stdout, stderr: this.stderr } = stdio);
     this.debugger = debug;
+    const isKilled = () => this.#killed;
     this[Internals] = {
+      get killed() {
+        return isKilled();
+      },
       stdio,
       onKill: (kill) => {
         if (this.#killed) kill();
@@ -117,7 +122,7 @@ export class Process implements PromiseLike<ProcessResult> {
     this.#killers.add(() => kill({ exitCode: 137, killed: true }));
 
     // Start the body on the next tick, so that callers can attach listeners first.
-    const ran = tick().then(() => body(this));
+    const ran = tick().then(() => (this.#killed ? 137 : body(this)));
     this.#result = Promise.race([
       ran.then((exitCode) => ({ exitCode, killed: false })),
       killed

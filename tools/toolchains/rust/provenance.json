@@ -10,5 +10,9 @@
   "artifacts": {
     "rustc": "https://debugger-sh.github.io/rust/0.3.15/rustc.wasm",
     "sysroot": "https://debugger-sh.github.io/rust/0.3.15/sysroot.tar.zst"
+  },
+  "sha256": {
+    "rustc": "b633bde043f54b0cef70969a59c77f1d568fde53a47476616e1228cc8c4b881f",
+    "sysroot": "06d8ae9fe4b18a55dad755d95e6e149fbbba045523b1396a84b891147f8305cb"
   }
 }

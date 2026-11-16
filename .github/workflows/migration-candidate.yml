@@ -1,0 +1,49 @@
+name: Migration candidate
+on:
+  push:
+    branches: [codex/upstream-migration-release]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  candidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.0'
+          cache: npm
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo install wasm-pack --version 0.15.0 --locked
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Build pinned candidate using the release build
+        run: |
+          npm version --no-git-tag-version "0.3.16-upstream.${GITHUB_SHA::12}"
+          npm run build:release
+          node -e 'require("fs").writeFileSync("dist/source.json", JSON.stringify({source: process.env.GITHUB_SHA, repository: process.env.GITHUB_REPOSITORY}))'
+          npm pack --json > pack.json
+          node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync("pack.json"))[0].filename)' > tarball.txt
+      - name: Run browser regressions and installed package smoke
+        run: |
+          node tests/package/toolchains.mjs > toolchains-verified.jsonl
+          npm run test:browser
+          ENGINE_BROWSER=webkit npm run test:browser -- tests/devices.ts tests/process.ts tests/toolchains/cpp.ts tests/toolchains/python.ts
+          node tests/package/smoke.mjs "$(cat tarball.txt)"
+      - name: Record and publish immutable prerelease artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum "$(cat tarball.txt)" dist/engine_bg.wasm > SHA256SUMS
+          tag="upstream-${GITHUB_SHA}"
+          gh release create "$tag" "$(cat tarball.txt)" SHA256SUMS pack.json toolchains-verified.jsonl --target "$GITHUB_SHA" --prerelease --title "Upstream migration ${GITHUB_SHA::12}" --notes "Pinned migration candidate; no stable npm publication. Built and smoke-tested in Chromium and WebKit from the installed tarball."
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-candidate-${{ github.sha }}
+          path: |
+            *.tgz
+            pack.json
+            SHA256SUMS

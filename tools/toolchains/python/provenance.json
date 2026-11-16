@@ -10,5 +10,9 @@
   "artifacts": {
     "python": "https://debugger-sh.github.io/cpython/0.3.15/python.wasm",
     "sysroot": "https://debugger-sh.github.io/cpython/0.3.15/sysroot.tar.zst"
+  },
+  "sha256": {
+    "python": "76976d2fe91a0970106430642d4dfce2301f9f0674fd1ef7e6ee263c9bf05838",
+    "sysroot": "26d969709d7f45b8a44800388d97e302cd3a663b327f0d9d720ae7bf8bd0e63d"
   }
 }

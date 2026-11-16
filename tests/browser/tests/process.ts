@@ -114,6 +114,16 @@ test('kill resolves immediately with 137', async () => {
   expect(await proc).toEqual({ exitCode: 137, killed: true });
 });
 
+test('kill before startup does not execute the guest and leaves rerun usable', async () => {
+  const tool = await withTool();
+  const proc = tool.run('/bin/main', ['write', '/must-not-exist', 'late']);
+  proc.kill();
+  expect(await proc).toEqual({ exitCode: 137, killed: true });
+  await sleep(100);
+  expect(await tool.fs.readDir('/')).not.toContain('must-not-exist');
+  expect(await tool.run('/bin/main', ['exit', '4'])).toEqual({ exitCode: 4, killed: false });
+});
+
 test('network errors exit with 127', async () => {
   const engine = await eng();
   const missing = `${location.origin}/missing.wasm`;

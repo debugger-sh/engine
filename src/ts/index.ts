@@ -267,6 +267,7 @@ export class Engine {
       fs: this.fs,
       process,
       run: async (command, args, step = {}) => {
+        if (process[Internals].killed || this.#disposed) return 137;
         const { stdio } = process[Internals];
         const child = this.#spawn(stdio, process.debugger, command, args, { env, ...step });
         const release = process[Internals].onKill(() => child.kill());
@@ -300,6 +301,7 @@ export class Engine {
     args: string[],
     options: StepOptions
   ): Promise<number> {
+    if (process[Internals].killed || this.#disposed) return 137;
     const name = options.name ?? program.path ?? program.url ?? 'main';
     const fail = async ([code, message]: Failure) => (
       await process[Internals].error(`${name}: ${message}`),
@@ -331,6 +333,7 @@ export class Engine {
       module = compiled;
     }
 
+    if (process[Internals].killed || this.#disposed) return 137;
     const { stdin, stdout, stderr } = process[Internals].stdio;
     const python = debug === 'python' ? process.debugger?.[Internals].python() : undefined;
     const devices = Object.entries({ ...options.devices, ...python }).map(([path, device]) => {
@@ -356,6 +359,10 @@ export class Engine {
     };
 
     const worker = await this.#pool.acquire();
+    if (process[Internals].killed || this.#disposed) {
+      this.#pool.release(worker);
+      return 137;
+    }
     const exited = new Promise<number>((resolve, reject) => {
       let release = () => {};
       const done = (finish: () => void) => {
@@ -410,6 +417,8 @@ export type { Filesystem } from './fs';
 export type { Device, PipeOptions, ProcessResult, Readable, Writable } from './process';
 export type { Process } from './process';
 export { Duplex, Pipe } from './process';
+export { toolchainProvenance } from './toolchains';
+export type { ToolchainProvenance } from './toolchains';
 export type {
   RunOptions,
   CppOptions,

@@ -26,16 +26,11 @@ export default defineConfig({
 });
 
 function wasm(): PluginOption {
-  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf-8')) as {
-    name: string;
-    version: string;
-  };
-  const packageName = packageJson.name;
-  const packageVersion = packageJson.version;
-  const npmDistUrl = `https://cdn.jsdelivr.net/npm/${packageName}@${packageVersion}/dist`;
-
   return {
     name: 'fix-wasm-import',
+    resolveFileUrl({ fileName }) {
+      if (fileName.endsWith('.wasm')) return JSON.stringify(`./${fileName}`);
+    },
     async closeBundle() {
       const pkgDir = 'pkg';
       if (fs.existsSync(pkgDir)) {
@@ -69,9 +64,16 @@ function wasm(): PluginOption {
       // In dev mode, we serve compiled Rust .wasm files from a local dev server
       if (devPort) return `export default new URL("http://localhost:${devPort}/${wasmFile}");`;
 
-      // In release mode, we serve .wasm files from the npm registry via CDN
-      if (isRelease)
-        return `export default new URL(${JSON.stringify(`${npmDistUrl}/${wasmFile}`)});`;
+      // Resolve the binary shipped in this package, including unpublished tarballs.
+      // A fixed registry URL can silently load an older, incompatible engine.
+      if (isRelease) {
+        const reference = this.emitFile({
+          type: 'asset',
+          fileName: wasmFile,
+          source: fs.readFileSync(id)
+        });
+        return `export default new URL(import.meta.ROLLUP_FILE_URL_${reference}, import.meta.url);`;
+      }
 
       // Otherwise, in normal local build, we b64 encode the .wasm files into a buffer
       // and bake into the bundled output, resulting in a very large bundle size

@@ -46,6 +46,21 @@ test('compiles, links and runs', async () => {
   await expect(engine.run('cpp')).outputs({ exitCode: 0, stdout: 'hello\n' });
 });
 
+test('compileOnly produces an executable without running guest code', async () => {
+  const engine = await eng({ 'main.cpp': HELLO });
+  await expect(engine.run('cpp', { compileOnly: true })).outputs({ exitCode: 0, stdout: '' });
+  await expect(engine.run('/build/main')).outputs({ exitCode: 0, stdout: 'hello\n' });
+});
+
+test('cache receipts include sysroot identity and hash system headers', async () => {
+  const engine = await eng({ 'main.cpp': HELLO });
+  await engine.run('cpp', { compileOnly: true });
+  const dep = await engine.fs.readFile('/build/main.cpp.d', 'utf8');
+  expect(dep).toContain('"sysroot":["https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.zst"');
+  expect(dep).toContain('"compiler":["https://debugger-sh.github.io/llvm/0.3.15/llvm.wasm"');
+  expect(dep).toMatch(/^\/include\/c\+\+\/v1\/cstdio: [0-9a-f]{8}$/m);
+});
+
 test('kill stops the build', async () => {
   const engine = await eng({ 'main.cpp': HELLO });
   const proc = engine.run('cpp');
@@ -166,4 +181,76 @@ test('up-to-date sources are not recompiled', async () => {
   const { modified } = await engine.fs.stat('/build/main.cpp.o');
   await expect(engine.run('cpp')).outputs({ stdout: 'hello\n' });
   expect((await engine.fs.stat('/build/main.cpp.o')).modified).toBe(modified);
+});
+
+test('changing sysroot identity invalidates otherwise unchanged objects', async () => {
+  const engine = await eng({ 'main.cpp': 'int main() { return 0; }' });
+  await engine.run('cpp', { compileOnly: true });
+  const before = (await engine.fs.stat('/build/main.cpp.o')).modified;
+  await sleep(5);
+  await expect(
+    engine.run('cpp', {
+      compileOnly: true,
+      sysroot: 'https://debugger-sh.github.io/llvm/0.3.15/sysroot.tar.zst#another-toolchain'
+    })
+  ).outputs({ exitCode: 0 });
+  expect((await engine.fs.stat('/build/main.cpp.o')).modified).toBeGreaterThan(before);
+});
+
+test('PCH bytes invalidate objects independently of header bytes and PCH is never an object', async () => {
+  const engine = await eng({
+    'main.cpp': 'int main() { return VALUE; }',
+    'support.h': '// unchanged header'
+  });
+  const pch = async (value: number) => {
+    await expect(
+      engine.run(
+        'clang',
+        [
+          '-cc1',
+          '-triple',
+          'wasm32-wasip1',
+          '-emit-pch',
+          '-disable-free',
+          '-isysroot',
+          '/',
+          '-internal-isystem',
+          '/include/c++/v1',
+          '-internal-isystem',
+          '/include',
+          '-internal-isystem',
+          '/include/wasm32-wasip1',
+          '-x',
+          'c++-header',
+          '-std=c++23',
+          '-O0',
+          '-debug-info-kind=standalone',
+          '-dwarf-version=5',
+          '-fcxx-exceptions',
+          '-fexceptions',
+          '-exception-model=wasm',
+          '-target-feature',
+          '+exception-handling',
+          '-mllvm',
+          '-wasm-enable-eh',
+          '-mllvm',
+          '-wasm-use-legacy-eh=true',
+          `-DVALUE=${value}`,
+          '/support.h',
+          '-o',
+          '/support.pch'
+        ],
+        { sysroot: 'cpp' }
+      )
+    ).outputs({ exitCode: 0 });
+  };
+  const options = { cxxFlags: ['-include-pch', '/support.pch'] };
+  await pch(11);
+  expect((await engine.run('cpp', options)).exitCode).toBe(11);
+  const modified = (await engine.fs.stat('/build/main.cpp.o')).modified;
+  expect((await engine.run('cpp', options)).exitCode).toBe(11);
+  expect((await engine.fs.stat('/build/main.cpp.o')).modified).toBe(modified);
+  await pch(22);
+  expect((await engine.run('cpp', options)).exitCode).toBe(22);
+  expect(await engine.fs.readDir('/build')).toEqual(['main', 'main.cpp.d', 'main.cpp.o']);
 });

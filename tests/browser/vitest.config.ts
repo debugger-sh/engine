@@ -27,7 +27,7 @@ export default defineConfig({
       enabled: true,
       headless: true,
       provider: playwright({ launchOptions: { proxy } }),
-      instances: [{ browser: 'chromium' }]
+      instances: [{ browser: process.env.ENGINE_BROWSER === 'webkit' ? 'webkit' : 'chromium' }]
     }
   }
 });
