@@ -42,10 +42,18 @@ try {
         if (new TextDecoder().decode(request) !== 'request\\n') throw new Error('duplex request');
         await device.write('response');
         if (await result !== 'response\\n') throw new Error('duplex response');
-        const blocked = engine.run('python', ['-c', 'input()'], { stdin: true });
-        blocked.kill();
-        if (!(await blocked).killed) throw new Error('cancel');
-        if (await capture(engine.run('python', ['-c', 'print("rerun-ok")'])) !== 'rerun-ok\\n') throw new Error('rerun');
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const blocked = engine.run('python', ['-c', 'print("ready"); input()'], { stdin: true });
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('input startup timeout')), 30000);
+            blocked.stdout.on('text', text => {
+              if (text.includes('ready')) { clearTimeout(timer); resolve(); }
+            });
+          });
+          blocked.kill();
+          if (!(await blocked).killed) throw new Error('cancel');
+          if (await capture(engine.run('python', ['-c', 'print("rerun-ok")'])) !== 'rerun-ok\\n') throw new Error('rerun');
+        }
         return { cpp: true, python: true, binary: true, duplex: true, stopRerun: true };
       } finally { engine.dispose(); }
     };

@@ -30,7 +30,7 @@ jobs:
         run: |
           node tests/package/toolchains.mjs > toolchains-verified.jsonl
           npm run test:browser
-          ENGINE_BROWSER=webkit npm run test:browser -- tests/devices.ts tests/process.ts tests/toolchains/cpp.ts tests/toolchains/python.ts
+          ENGINE_BROWSER=webkit npm run test:browser -- tests/devices.ts tests/process.ts tests/toolchains/cpp.ts tests/toolchains/python.ts tests/initialization.ts
           node tests/package/smoke.mjs "$(cat tarball.txt)"
           npm run test:dap
       - name: Record and publish immutable prerelease artifact

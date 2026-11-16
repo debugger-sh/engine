@@ -102,16 +102,20 @@ export class Engine {
 
   /** Creates an engine. Remember to call {@link Engine.dispose} when you're done with it. */
   static async create(options?: EngineOptions): Promise<Engine> {
-    runtime ??= (async () => {
+    const pending = (runtime ??= (async () => {
       const binary = wasmBinary as unknown as URL | Uint8Array<ArrayBuffer>;
       const module = await WebAssembly.compile(
         binary instanceof URL ? await (await fetch(binary)).arrayBuffer() : binary
       );
       const exports = await init({ module_or_path: module });
       return { module, exports };
-    })();
+    })());
 
-    const engine = new Engine(Internals, await runtime);
+    const loaded = await pending.catch((error) => {
+      if (runtime === pending) runtime = undefined;
+      throw error;
+    });
+    const engine = new Engine(Internals, loaded);
     if (options?.fs) await engine.fs.mount(options.fs);
     return engine;
   }
