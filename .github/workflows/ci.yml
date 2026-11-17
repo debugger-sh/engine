@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -37,3 +36,9 @@ jobs:
 
       - name: Lint
         run: npx eslint src/
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Test
+        run: npm run test
