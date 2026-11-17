@@ -34,7 +34,6 @@ jobs:
           cache: npm
           registry-url: 'https://registry.npmjs.org'
 
-      # Node 24 bundles npm >= 11.5.1, as trusted publishing requires.
       - run: npm ci
       - run: echo "cur_version=$(jq -r .version package.json)" >> $GITHUB_ENV
       - run: echo "prev_version=$(npm view . version 2>/dev/null || echo '0.0.0')" >> $GITHUB_ENV
