@@ -388,7 +388,7 @@ impl EvaluationContext {
             .as_deref()
             .context("Cannot evaluate expression without debugger")?;
 
-        let pc: CodeOffset = debugger.stack().read_u32(self.offset.into()).into();
+        let pc: CodeOffset = debugger.stack().read_u32(self.offset.into())?.into();
 
         let func = debugger
             .info()
@@ -483,7 +483,7 @@ impl EvaluationContext {
                         (1..=8).contains(&size),
                         "Unsupported DWARF memory read size {size}"
                     );
-                    let bytes = debugger.memory().read(address.into(), size);
+                    let bytes = debugger.memory().read(address.into(), size)?;
                     let mut raw = [0u8; 8];
                     raw[..size].copy_from_slice(&bytes[..size]);
                     let value = u64::from_le_bytes(raw);
@@ -510,7 +510,7 @@ impl EvaluationContext {
 
         let offset = (self.offset as usize) + entry.offset;
         Ok(gimli::Value::Generic(
-            debugger.stack().read_u64(offset.into()),
+            debugger.stack().read_u64(offset.into())?,
         ))
     }
 }
