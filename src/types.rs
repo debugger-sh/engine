@@ -262,33 +262,29 @@ impl MemoryDescriptor {
         buffer.byte_length() as usize
     }
 
-    pub fn read(&self, addr: MemoryOffset, len: usize) -> Vec<u8> {
-        let offset: usize = addr.into();
+    /// Reads `len` bytes at `addr`, failing if any byte lies outside this memory.
+    pub fn read(&self, addr: MemoryOffset, len: usize) -> anyhow::Result<Vec<u8>> {
         let memory_buffer = self.memory.buffer();
         let buffer = memory_buffer.unchecked_ref::<js_sys::ArrayBuffer>();
+        anyhow::ensure!(
+            u64::from(addr)
+                .checked_add(len as u64)
+                .is_some_and(|end| end <= buffer.byte_length() as u64),
+            "Memory read of {len} bytes at {} is out of bounds",
+            u64::from(addr)
+        );
         let mut out = vec![0u8; len];
-        let n = (buffer.byte_length() as usize)
-            .saturating_sub(offset)
-            .min(len);
-        if n > 0 {
-            js_sys::Uint8Array::new_with_byte_offset_and_length(
-                &buffer.into(),
-                offset as u32,
-                n as u32,
-            )
-            .copy_to(&mut out[..n]);
-        }
-        out
+        js_sys::Uint8Array::new_with_byte_offset_and_length(&buffer.into(), addr.into(), len as u32)
+            .copy_to(&mut out);
+        Ok(out)
     }
 
-    pub fn read_u64(&self, addr: MemoryOffset) -> u64 {
-        let bytes = self.read(addr, 8);
-        u64::from_le_bytes(bytes.try_into().unwrap()).into()
+    pub fn read_u64(&self, addr: MemoryOffset) -> anyhow::Result<u64> {
+        Ok(u64::from_le_bytes(self.read(addr, 8)?.try_into().unwrap()))
     }
 
-    pub fn read_u32(&self, addr: MemoryOffset) -> u32 {
-        let bytes = self.read(addr, 4);
-        u32::from_le_bytes(bytes.try_into().unwrap()).into()
+    pub fn read_u32(&self, addr: MemoryOffset) -> anyhow::Result<u32> {
+        Ok(u32::from_le_bytes(self.read(addr, 4)?.try_into().unwrap()))
     }
 }
 

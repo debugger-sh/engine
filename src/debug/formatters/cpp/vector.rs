@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 
 use crate::debug::formatters::default::StructureFormatter;
 use crate::debug::formatters::{ChildCounts, VariableFormatter};
@@ -38,15 +38,7 @@ impl StdVectorFormatter {
             .byte_size()
             .context("std::vector element size is unavailable")? as usize;
 
-        if elem_size == 0 {
-            return Ok(VectorData {
-                begin: begin.clone(),
-                count: 0,
-                elem_ty,
-                elem_size: 0,
-            });
-        }
-
+        ensure!(elem_size > 0, "Invalid std::vector element size");
         let count = match value.child_with_name("__size_") {
             Some(size) => size
                 .unsigned_value()
@@ -56,9 +48,22 @@ impl StdVectorFormatter {
                     .child_with_name("__end_")
                     .and_then(|end| end.pointer_value())
                     .context("std::vector __end_ is unavailable")?;
-                u64::from(end).saturating_sub(u64::from(begin_addr)) / elem_size as u64
+                let bytes = u64::from(end)
+                    .checked_sub(u64::from(begin_addr))
+                    .context("std::vector end precedes begin")?;
+                ensure!(bytes % elem_size as u64 == 0, "Invalid std::vector element range");
+                bytes / elem_size as u64
             }
         };
+        let memory_size = value.debugger().context("no debugger")?.memory().byte_size() as u64;
+        ensure!(
+            count
+                .checked_mul(elem_size as u64)
+                .and_then(|bytes| bytes.checked_add(u64::from(begin_addr)))
+                .is_some_and(|end| end <= memory_size),
+            "std::vector storage is outside memory"
+        );
+        ensure!(count == 0 || !begin_addr.is_null(), "std::vector storage is null");
         Ok(VectorData {
             begin: begin.clone(),
             count: count as usize,
@@ -70,7 +75,7 @@ impl StdVectorFormatter {
 
 impl VariableFormatter for StdVectorFormatter {
     fn matches(&self, ty: &Type) -> bool {
-        ty.matches("^std::vector<.+>$")
+        ty.matches("^std::vector<.+>$") && !ty.matches("^std::vector<bool[,>]")
     }
 
     fn display(&self, value: &Variable) -> Result<String> {
@@ -86,9 +91,7 @@ impl VariableFormatter for StdVectorFormatter {
         let data = Self::data(value)?;
         let start = range.start.min(data.count);
         let end = range.end.min(data.count);
-        if data.elem_size == 0 {
-            return Ok(Vec::new());
-        }
+        ensure!(end.saturating_sub(start) <= 10_000, "std::vector page exceeds 10000 elements");
 
         let mut result = Vec::with_capacity(end.saturating_sub(start));
         for i in start..end {
