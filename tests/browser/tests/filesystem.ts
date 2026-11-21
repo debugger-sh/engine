@@ -100,6 +100,13 @@ test('readFile of a missing file rejects', async () => {
   await expect(fs.readFile('/missing')).rejects.toThrow();
 });
 
+test('exists checks files and directories', async () => {
+  const { fs } = await eng({ 'file.txt': '', dir: { files: {} } });
+  expect(await fs.exists('/file.txt')).toBe(true);
+  expect(await fs.exists('/dir')).toBe(true);
+  expect(await fs.exists('/missing')).toBe(false);
+});
+
 test('writeFile and readFile', async () => {
   const { fs } = await eng();
   await fs.writeFile('/a.txt', 'text');

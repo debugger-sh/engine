@@ -248,6 +248,11 @@ export interface RustOptions {
    * Additional flags that are passed to the compiler (`rustc`).
    */
   rustFlags?: string[];
+
+  /**
+   * Additional flags that are passed to the linker (`lld`).
+   */
+  lldFlags?: string[];
 }
 
 export interface ToolchainOptionsMap {
@@ -339,23 +344,57 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
     return 1;
   }
   const object = (source: string) => join(buildDir, source) + '.o';
+  let compiled = false;
 
   const code = await compileAll(files, async (source) => {
     const obj = object(source);
     const dep = obj.replace(/\.o$/, '.d');
-    // prettier-ignore
     const args = [
-      '-cc1', '-triple', 'wasm32-wasip1', '-Werror', '-emit-obj', '-disable-free',
-      '-isysroot', '/', '-internal-isystem', '/include/c++/v1', '-internal-isystem', '/include',
-      '-internal-isystem', '/include/wasm32-wasip1', '-ferror-limit', '4', '-fcolor-diagnostics',
-      '-x', 'c++', '-std=c++23', '-O0', '-debug-info-kind=standalone', '-dwarf-version=5',
-      '-fcxx-exceptions', '-fexceptions', '-exception-model=wasm', '-target-feature',
-      '+exception-handling', '-mllvm', '-wasm-enable-eh', '-mllvm', '-wasm-use-legacy-eh=true',
-      '-dependency-file', dep, '-MT', obj, ...cxxFlags, '-o', obj, source
+      '-cc1',
+      '-triple',
+      'wasm32-wasip1',
+      '-Werror',
+      '-emit-obj',
+      '-disable-free',
+      '-isysroot',
+      '/',
+      '-internal-isystem',
+      '/include/c++/v1',
+      '-internal-isystem',
+      '/include',
+      '-internal-isystem',
+      '/include/wasm32-wasip1',
+      '-ferror-limit',
+      '4',
+      '-fcolor-diagnostics',
+      '-x',
+      'c++',
+      '-std=c++23',
+      '-O0',
+      '-debug-info-kind=standalone',
+      '-dwarf-version=5',
+      '-fcxx-exceptions',
+      '-fexceptions',
+      '-exception-model=wasm',
+      '-target-feature',
+      '+exception-handling',
+      '-mllvm',
+      '-wasm-enable-eh',
+      '-mllvm',
+      '-wasm-use-legacy-eh=true',
+      '-dependency-file',
+      dep,
+      '-MT',
+      obj,
+      ...cxxFlags,
+      '-o',
+      obj,
+      source
     ];
-    const command = JSON.stringify(args);
+    const command = JSON.stringify(cxxFlags);
     if (!(await isStale(ctx.fs, obj, dep, command))) return 0;
 
+    compiled = true;
     await ctx.fs.mkdir(dirname(obj), { recursive: true });
     const code = await ctx.run('clang', args, { sysroot });
     if (code === 0) await recordHashes(ctx.fs, dep, command);
@@ -364,13 +403,34 @@ async function cpp(ctx: Context<'cpp'>): Promise<number> {
   if (code) return code;
 
   const main = join(buildDir, 'main');
-  // prettier-ignore
-  const linked = await ctx.run('lld', [
-    '--export-dynamic', '-z', 'stack-size=1048576', '-L/lib/wasm32-wasip1', '/lib/wasm32-wasip1/crt1.o',
-    ...files.map(object), '-lc++', '-lc++abi', '-lunwind', '/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a', '-lc',
-    ...lldFlags, '-o', main
-  ], { sysroot });
-  if (linked) return linked;
+  const dep = `${main}.d`;
+  const command = lldFlags.length ? JSON.stringify(lldFlags) : '';
+  const previous = (await ctx.fs.exists(dep)) ? await ctx.fs.readFile(dep, 'utf8') : '';
+  if (compiled || !(await ctx.fs.exists(main)) || previous !== command) {
+    const linked = await ctx.run(
+      'lld',
+      [
+        '--export-dynamic',
+        '-z',
+        'stack-size=1048576',
+        '-L/lib/wasm32-wasip1',
+        '/lib/wasm32-wasip1/crt1.o',
+        ...files.map(object),
+        '-lc++',
+        '-lc++abi',
+        '-lunwind',
+        '/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a',
+        '-lc',
+        ...lldFlags,
+        '-o',
+        main
+      ],
+      { sysroot }
+    );
+    if (linked) return linked;
+    if (lldFlags.length) await ctx.fs.writeFile(dep, command);
+    else if (await ctx.fs.exists(dep)) await ctx.fs.remove(dep);
+  }
 
   return ctx.run(main, ctx.args, { debug: ctx.options.debug, devices: ctx.options.devices });
 }
@@ -387,8 +447,8 @@ async function isStale(
   command: string
 ): Promise<boolean> {
   const raw = fs[Internals].raw();
-  const text = await fs.readFile(dep, 'utf8').catch(() => undefined);
-  if (text === undefined || !(await raw.hash(obj))) return true;
+  if (!(await fs.exists(dep)) || !(await fs.exists(obj))) return true;
+  const text = await fs.readFile(dep, 'utf8');
   const [rule, ...lines] = text.replace(/\\\n/g, ' ').split('\n');
   if (!lines.includes(`# ${command}`)) return true;
   const hashes = new Map(lines.map((line) => line.split(': ') as [string, string]));
@@ -415,15 +475,28 @@ function dependencies(rule: string): string[] {
 }
 
 /** The standard library rlibs to link, in dependency order. */
-// prettier-ignore
 const RUST_LIBS = [
-  'panic_abort', 'std', 'wasi', 'wasip1', 'cfg_if', 'rustc_demangle', 'std_detect', 'hashbrown',
-  'rustc_std_workspace_alloc', 'miniz_oxide', 'adler2', 'unwind', 'libc',
-  'rustc_std_workspace_core', 'alloc', 'core', 'compiler_builtins'
+  'panic_abort',
+  'std',
+  'wasi',
+  'wasip1',
+  'cfg_if',
+  'rustc_demangle',
+  'std_detect',
+  'hashbrown',
+  'rustc_std_workspace_alloc',
+  'miniz_oxide',
+  'adler2',
+  'unwind',
+  'libc',
+  'rustc_std_workspace_core',
+  'alloc',
+  'core',
+  'compiler_builtins'
 ];
 
 async function rust(ctx: Context<'rust'>): Promise<number> {
-  const { buildDir = '/build', rustFlags = [], sysroot = 'rust' } = ctx.options;
+  const { buildDir = '/build', rustFlags = [], lldFlags = [], sysroot = 'rust' } = ctx.options;
   const files = await sources(ctx, ['**/*.rs']);
   if (!files.length) {
     await ctx.process[Internals].error('rust: no sources found');
@@ -443,11 +516,25 @@ async function rust(ctx: Context<'rust'>): Promise<number> {
   const code = await compileAll(files, async (source) => {
     await ctx.fs.mkdir(dirname(object(source)), { recursive: true });
     for (const shim of await shims(source)) await ctx.fs.remove(shim);
-    // prettier-ignore
-    return ctx.run('rustc', [
-      source, '--sysroot', '/', '--target', 'wasm32-wasip1', '-Cpanic=abort', '-Ccodegen-units=1',
-      '-Zthreads=1', '--emit=obj', ...debug, ...rustFlags, '-o', object(source)
-    ], { sysroot });
+    return ctx.run(
+      'rustc',
+      [
+        source,
+        '--sysroot',
+        '/',
+        '--target',
+        'wasm32-wasip1',
+        '-Cpanic=abort',
+        '-Ccodegen-units=1',
+        '-Zthreads=1',
+        '--emit=obj',
+        ...debug,
+        ...rustFlags,
+        '-o',
+        object(source)
+      ],
+      { sysroot }
+    );
   });
   if (code) return code;
   const objects = (
@@ -462,12 +549,27 @@ async function rust(ctx: Context<'rust'>): Promise<number> {
     .map((rlib) => join(lib, rlib));
 
   const main = join(buildDir, 'main');
-  // prettier-ignore
-  const linked = await ctx.run('lld', [
-    '--export=__main_void', '-z', 'stack-size=1048576', '--stack-first', '--no-demangle',
-    `${lib}/self-contained/crt1-command.o`, ...objects, ...libs,
-    `-L${lib}/self-contained`, '-lc', '-o', main, '--gc-sections', '-O0'
-  ], { sysroot });
+  const linked = await ctx.run(
+    'lld',
+    [
+      '--export=__main_void',
+      '-z',
+      'stack-size=1048576',
+      '--stack-first',
+      '--no-demangle',
+      `${lib}/self-contained/crt1-command.o`,
+      ...objects,
+      ...libs,
+      `-L${lib}/self-contained`,
+      '-lc',
+      ...lldFlags,
+      '-o',
+      main,
+      '--gc-sections',
+      '-O0'
+    ],
+    { sysroot }
+  );
   if (linked) return linked;
 
   return ctx.run(main, ctx.args, { debug: ctx.options.debug, devices: ctx.options.devices });

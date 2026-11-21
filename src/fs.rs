@@ -505,6 +505,11 @@ impl Fs {
         now(self.fs().rename(&from, &to)).map_err(|e| fs_error(e, &from))
     }
 
+    pub async fn exists(&self, path: String) -> bool {
+        let _guard = Guard::lock_async().await;
+        self.fs().metadata(&normalize(path)).is_ok()
+    }
+
     /// Returns `[isDir, size, modified, accessed, created]` (times in milliseconds).
     pub async fn stat(&self, path: String) -> Result<Vec<f64>, JsError> {
         let _guard = Guard::lock_async().await;

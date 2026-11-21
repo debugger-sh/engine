@@ -61,7 +61,14 @@ test('link errors exit non-zero', async () => {
 
 test('lldFlags are passed to the linker', async () => {
   const engine = await eng({ 'main.cpp': HELLO });
+  expect((await engine.run('cpp')).exitCode).toBe(0);
   expect((await engine.run('cpp', { lldFlags: ['--bogus-flag'] })).exitCode).not.toBe(0);
+});
+
+test('lldFlags are recorded for cached linking', async () => {
+  const engine = await eng({ 'main.cpp': HELLO });
+  await engine.run('cpp', { lldFlags: ['--gc-sections'] });
+  expect(await engine.fs.readFile('/build/main.d', 'utf8')).toBe('["--gc-sections"]');
 });
 
 test('compiles multiple sources (in parallel)', async () => {
@@ -115,6 +122,7 @@ test('the sysroot is invisible to the filesystem', async () => {
 test('changed flags cause a recompile', async () => {
   const engine = await eng({ 'main.cpp': 'int main() { return VALUE; }' });
   expect((await engine.run('cpp', { cxxFlags: ['-DVALUE=1'] })).exitCode).toBe(1);
+  expect(await engine.fs.readFile('/build/main.cpp.d', 'utf8')).toContain('# ["-DVALUE=1"]');
   expect((await engine.run('cpp', { cxxFlags: ['-DVALUE=2'] })).exitCode).toBe(2);
 });
 
@@ -163,7 +171,10 @@ test('only stale sources are recompiled', async () => {
 test('up-to-date sources are not recompiled', async () => {
   const engine = await eng({ 'main.cpp': HELLO });
   await engine.run('cpp');
-  const { modified } = await engine.fs.stat('/build/main.cpp.o');
+  await engine.fs.writeFile('/build/main.d', '');
+  const { modified: objectModified } = await engine.fs.stat('/build/main.cpp.o');
+  const { modified: mainModified } = await engine.fs.stat('/build/main');
   await expect(engine.run('cpp')).outputs({ stdout: 'hello\n' });
-  expect((await engine.fs.stat('/build/main.cpp.o')).modified).toBe(modified);
+  expect((await engine.fs.stat('/build/main.cpp.o')).modified).toBe(objectModified);
+  expect((await engine.fs.stat('/build/main')).modified).toBe(mainModified);
 });

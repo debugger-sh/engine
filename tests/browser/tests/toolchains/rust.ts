@@ -43,6 +43,11 @@ test('rustFlags are passed to rustc', async () => {
   expect((await engine.run('rust', { rustFlags: ['--cfg', 'x'] })).exitCode).toBe(0);
 });
 
+test('lldFlags are passed to the linker', async () => {
+  const engine = await eng({ 'main.rs': 'fn main() {}' });
+  expect((await engine.run('rust', { lldFlags: ['--bogus-flag'] })).exitCode).not.toBe(0);
+});
+
 test('rustc can be run on its own', async () => {
   const engine = await eng({ 'main.rs': 'fn main() {}' });
   const args = [

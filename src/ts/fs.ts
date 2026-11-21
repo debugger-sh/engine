@@ -186,6 +186,10 @@ export class Filesystem {
     return this.#raw.rename(from, to);
   }
 
+  async exists(path: string): Promise<boolean> {
+    return this.#raw.exists(path);
+  }
+
   async stat(path: string): Promise<FileStat> {
     const [isDir, size, modified, accessed, created] = await this.#raw.stat(path);
     return { kind: isDir ? 'directory' : 'file', size, modified, accessed, created };
