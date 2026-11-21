@@ -102,3 +102,19 @@ test('operations resolve if the process exits before it can be debugged', async 
   expect(await proc.debugger.continue()).toBeNull();
   expect((await proc).exitCode).not.toBe(0);
 });
+
+test('inspects state from inside a stop listener', async () => {
+  const engine = await eng({ 'main.cpp': SQUARE });
+  const proc = engine.run('cpp', { debug: true });
+  const dbg = proc.debugger;
+  await dbg.setBreakpoints('main.cpp', [{ line: 2 }]);
+
+  const seen = new Promise<string | undefined>((resolve) =>
+    dbg.once('stop', (stop) => resolve(stop.frames()[0]?.name))
+  );
+  await dbg.continue();
+  expect(await seen).toBe('square');
+
+  expect(await dbg.continue()).toBeNull();
+  expect((await proc).exitCode).toBe(9);
+});

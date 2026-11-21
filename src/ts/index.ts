@@ -14,6 +14,7 @@ import {
   toolchains
 } from './toolchains';
 import { internal, Internals, join } from './util';
+import EngineWorker from './worker?worker&inline';
 
 /**
  * A command to run: a language toolchain or built-in command, or a WASI executable
@@ -125,7 +126,7 @@ export class Engine {
     const { module, exports } = runtime;
     this.fs = new Filesystem(Internals, new Fs());
     this.#pool = new Pool((gate) => {
-      const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+      const worker = new EngineWorker();
       worker.postMessage({ type: 'init', module, memory: exports.memory, gate });
       return worker;
     });

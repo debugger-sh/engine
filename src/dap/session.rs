@@ -14,7 +14,7 @@ pub struct DapSession {
     debugger: Option<Box<dyn DapDebugger>>,
     client_initialized: bool,
     initialized_emitted: bool,
-    callback: Option<js_sys::Function>,
+    pending_events: Vec<wasm_bindgen::JsValue>,
 }
 
 impl DapSession {
@@ -24,12 +24,8 @@ impl DapSession {
             debugger: None,
             client_initialized: false,
             initialized_emitted: false,
-            callback: None,
+            pending_events: Vec::new(),
         }
-    }
-
-    pub fn set_callback(&mut self, callback: js_sys::Function) {
-        self.callback = Some(callback);
     }
 
     pub fn set_debugger(&mut self, debugger: Box<dyn DapDebugger>) {
@@ -48,22 +44,21 @@ impl DapSession {
         self.seq_counter
     }
 
-    /// Emit a DAP event with the next sequence number.
     pub fn emit_event(&mut self, event_name: &str, body: Option<Value>) {
         let seq = self.next_seq();
-        let callback = self.callback.clone();
-
-        if let Some(callback) = callback {
-            let msg = ProtocolMessage::Event {
-                seq,
-                event: event_name.to_string(),
-                body,
-            };
-            let ser = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
-            if let Ok(val) = msg.serialize(&ser) {
-                let _ = callback.call1(&wasm_bindgen::JsValue::NULL, &val);
-            }
+        let msg = ProtocolMessage::Event {
+            seq,
+            event: event_name.to_string(),
+            body,
+        };
+        let ser = serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+        if let Ok(val) = msg.serialize(&ser) {
+            self.pending_events.push(val);
         }
+    }
+
+    pub fn take_events(&mut self) -> Vec<wasm_bindgen::JsValue> {
+        std::mem::take(&mut self.pending_events)
     }
 
     /// DAP: `InitializedEvent` after `initialize` was handled and a debugger is attached.

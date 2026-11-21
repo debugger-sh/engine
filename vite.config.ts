@@ -3,57 +3,45 @@ import path from 'path';
 import { defineConfig, PluginOption } from 'vite';
 import dts from 'vite-plugin-dts';
 
-const outDir = 'dist';
-
 export default defineConfig({
-  // Resolve the worker chunk relative to the library, wherever it is served from
-  base: './',
   plugins: [wasm(), dts()],
   worker: {
     format: 'es',
     plugins: () => [wasm()]
   },
   build: {
-    outDir,
     lib: {
       entry: 'src/ts/index.ts',
-      name: 'engine',
       fileName: 'debugger-sh',
-      // Workers are separate chunks, which UMD cannot express
       formats: ['es']
     }
   }
 });
 
 function wasm(): PluginOption {
-  const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf-8')) as {
+  const { name, version } = JSON.parse(fs.readFileSync('package.json', 'utf-8')) as {
     name: string;
     version: string;
   };
-  const packageName = packageJson.name;
-  const packageVersion = packageJson.version;
-  const npmDistUrl = `https://cdn.jsdelivr.net/npm/${packageName}@${packageVersion}/dist`;
+  const cdn = `https://cdn.jsdelivr.net/npm/${name}@${version}/dist`;
 
   return {
     name: 'fix-wasm-import',
-    async closeBundle() {
-      const pkgDir = 'pkg';
-      if (fs.existsSync(pkgDir)) {
-        const wasmFiles = fs.readdirSync(pkgDir).filter((file) => file.endsWith('.wasm'));
-        fs.mkdirSync(outDir, { recursive: true });
-        for (const wasmFile of wasmFiles) {
-          fs.copyFileSync(path.join(pkgDir, wasmFile), path.join(outDir, wasmFile));
-        }
-      }
 
-      // Workers receive the compiled engine from the main thread, so drop the
-      // copies of the binary that `wasm-bindgen`'s default URL inlines
-      for (const file of fs.readdirSync(outDir, { recursive: true, encoding: 'utf-8' })) {
-        if (!file.endsWith('.js')) continue;
-        const js = fs.readFileSync(path.join(outDir, file), { encoding: 'utf-8' });
-        const stripped = js.replaceAll(/(["'`])data:application\/wasm[^"'`]*\1/g, '""');
-        fs.writeFileSync(path.join(outDir, file), stripped, { encoding: 'utf-8' });
-      }
+    closeBundle() {
+      const binary = 'pkg/engine_bg.wasm';
+      if (!fs.existsSync(binary)) return;
+      fs.mkdirSync('dist', { recursive: true });
+      fs.copyFileSync(binary, path.join('dist', path.basename(binary)));
+    },
+
+    /**
+     * The engine is always initialized with the module compiled on the main thread, so drop
+     * the copies of the binary that `wasm-bindgen`'s default URL inlines. This runs per chunk
+     * (rather than on the written files) so that it also applies to the worker before it is inlined.
+     */
+    renderChunk(code) {
+      return code.replaceAll(/(["'`])data:application\/wasm[^"'`]*\1/g, '""');
     },
 
     /**
@@ -70,8 +58,7 @@ function wasm(): PluginOption {
       if (devPort) return `export default new URL("http://localhost:${devPort}/${wasmFile}");`;
 
       // In release mode, we serve .wasm files from the npm registry via CDN
-      if (isRelease)
-        return `export default new URL(${JSON.stringify(`${npmDistUrl}/${wasmFile}`)});`;
+      if (isRelease) return `export default new URL(${JSON.stringify(`${cdn}/${wasmFile}`)});`;
 
       // Otherwise, in normal local build, we b64 encode the .wasm files into a buffer
       // and bake into the bundled output, resulting in a very large bundle size
